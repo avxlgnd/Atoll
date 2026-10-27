@@ -36,6 +36,9 @@ class LockScreenLiveActivityWindowManager {
     private var screenChangeObserver: NSObjectProtocol?
     private var workspaceObservers: [NSObjectProtocol] = []
     private var currentNotchSize: CGSize?
+    /// Bumped on every present so a stale fade-out can't order the window out
+    /// after a newer animation (e.g. unlock right after an external-display lock) started.
+    private var presentationGeneration = 0
 
     /// Whether the target screen uses Dynamic Island (pill) mode.
     private var isDynamicIslandMode: Bool {
@@ -198,6 +201,7 @@ class LockScreenLiveActivityWindowManager {
             hasDelegated = true
         }
 
+        presentationGeneration += 1
         window.orderFrontRegardless()
         window.alphaValue = 1
 
@@ -226,6 +230,18 @@ class LockScreenLiveActivityWindowManager {
         }
 
         print("[\(timestamp())] LockScreenLiveActivityWindowManager: showing locked state")
+
+        // External display: show the lock animation briefly, then fade it out
+        // instead of leaving it up for the whole time the Mac is locked.
+        if !context.screen.isBuiltInDisplay {
+            hideTask = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(LockScreenAnimationTimings.externalLockVisibleDuration))
+                guard let self, !Task.isCancelled else { return }
+                await MainActor.run {
+                    self.hideWithAnimation(duration: LockScreenAnimationTimings.externalLockFadeDuration)
+                }
+            }
+        }
     }
 
     func showUnlockAndScheduleHide() {
@@ -255,8 +271,9 @@ class LockScreenLiveActivityWindowManager {
         hideWithAnimation()
     }
 
-    private func hideWithAnimation() {
+    private func hideWithAnimation(duration: TimeInterval = LockScreenAnimationTimings.unlockCollapse) {
         guard let window else { return }
+        let generation = presentationGeneration
 
         let targetScale: CGFloat
         if let notchSize = currentNotchSize {
@@ -265,18 +282,19 @@ class LockScreenLiveActivityWindowManager {
             targetScale = 0.7
         }
 
-        withAnimation(.smooth(duration: LockScreenAnimationTimings.unlockCollapse)) {
+        withAnimation(.smooth(duration: duration)) {
             overlayModel.opacity = 0
             overlayModel.scale = targetScale
         }
 
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = LockScreenAnimationTimings.unlockCollapse
+            context.duration = duration
             context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             window.animator().alphaValue = 0
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + LockScreenAnimationTimings.unlockCollapse + 0.02) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration + 0.02) { [weak self] in
+            guard let self, generation == self.presentationGeneration else { return }
             window.orderOut(nil)
             self.currentNotchSize = nil
         }

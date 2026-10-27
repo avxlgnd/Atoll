@@ -847,6 +847,8 @@ extension Defaults.Keys {
         default: .notch
     )
     static let hideNonNotchUntilHover = Key<Bool>("hideNonNotchUntilHover", default: false)
+    /// External (non built-in) displays only: keep the notch hidden until media is playing.
+    static let hideExternalNotchUntilMedia = Key<Bool>("hideExternalNotchUntilMedia", default: false)
     static let notchHeightMode = Key<WindowHeightMode>(
         "notchHeightMode",
         default: WindowHeightMode.matchRealNotchSize

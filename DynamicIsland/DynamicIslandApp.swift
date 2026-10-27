@@ -18,6 +18,7 @@
 
 import AVFoundation
 import Combine
+import QuartzCore
 import Defaults
 import KeyboardShortcuts
 import Sparkle
@@ -119,6 +120,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var onboardingWindowController: NSWindowController?
     private var cancellables = Set<AnyCancellable>()
     private var windowsHiddenForLock = false
+    private var unlockRestoreWorkItem: DispatchWorkItem?
     private var optionalShortcutHandlersRegistered = false
     private weak var focusWithoutDevToolsMenuItem: NSMenuItem?
     private weak var focusUseDevToolsMenuItem: NSMenuItem?
@@ -264,43 +266,143 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func onScreenUnlocked(_: Notification) {
         print("Screen unlocked")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+        scheduleNotchRestoreAfterUnlock()
+    }
+
+    /// How long after an unlock the notch comes back. With the lock-screen live activity on,
+    /// the notch is gone while the unlock animation plays and collapses, then stays gone for
+    /// `postUnlockNotchReappearGap` (1.5s) before it fades back in.
+    private func notchReappearDelayAfterUnlock() -> TimeInterval {
+        guard Defaults[.enableLockScreenLiveActivity] else { return 1.0 }
+        return LockScreenAnimationTimings.unlockOverlayTotalDuration
+            + LockScreenAnimationTimings.postUnlockNotchReappearGap
+    }
+
+    /// Schedules the notch to reappear after an unlock. Safe to call more than once per
+    /// unlock (LockScreenManager and the system notification both call it); only the
+    /// first call schedules anything.
+    func scheduleNotchRestoreAfterUnlock() {
+        guard windowsHiddenForLock, unlockRestoreWorkItem == nil else { return }
+
+        let item = DispatchWorkItem { [weak self] in
             guard let self = self else { return }
+            self.unlockRestoreWorkItem = nil
+            // Reposition while still hidden, then come back transparent and fade in.
+            self.adjustWindowPosition()
             self.restoreWindowsAfterLock()
-            self.adjustWindowPosition(changeAlpha: true)
+            self.fadeInNotchWindows(duration: LockScreenAnimationTimings.postUnlockNotchFadeIn)
         }
+        unlockRestoreWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + notchReappearDelayAfterUnlock(), execute: item)
     }
 
     private func hideWindowsForLock() {
+        // A new lock cancels any reappear that was still pending from the previous unlock.
+        unlockRestoreWorkItem?.cancel()
+        unlockRestoreWorkItem = nil
+
         guard !windowsHiddenForLock else { return }
         windowsHiddenForLock = true
 
-        if Defaults[.showOnAllDisplays] {
-            for window in windows.values {
-                window.alphaValue = 0
-                window.orderOut(nil)
-            }
-        } else if let window = window {
-            window.alphaValue = 0
-            window.orderOut(nil)
+        for entry in notchWindowEntries() {
+            entry.window.alphaValue = 0
+            entry.window.orderOut(nil)
         }
     }
 
+    /// Brings the windows back on screen fully transparent; `fadeInNotchWindows` animates them in.
     private func restoreWindowsAfterLock() {
         guard windowsHiddenForLock else { return }
         windowsHiddenForLock = false
 
-        if Defaults[.showOnAllDisplays] {
-            for window in windows.values {
-                window.orderFrontRegardless()
-                window.alphaValue = 1
-            }
-        } else if let window = window {
-            window.orderFrontRegardless()
-            window.alphaValue = 1
+        for entry in notchWindowEntries() {
+            entry.window.alphaValue = 0
+            entry.window.orderFrontRegardless()
         }
     }
-    
+
+    private func fadeInNotchWindows(duration: TimeInterval) {
+        applyNotchWindowVisibility(animated: true, duration: duration)
+    }
+
+    // MARK: - External display: hide until media plays
+
+    private typealias NotchWindowEntry = (window: NSWindow, screenName: String?, viewModel: DynamicIslandViewModel?)
+
+    private func notchWindowEntries() -> [NotchWindowEntry] {
+        if Defaults[.showOnAllDisplays] {
+            return windows.map { (screen, window) in
+                (window: window, screenName: screen.localizedName, viewModel: viewModels[screen])
+            }
+        }
+        if let window = window {
+            return [(window: window, screenName: vm.screen, viewModel: vm)]
+        }
+        return []
+    }
+
+    private func isExternalDisplay(named name: String?) -> Bool {
+        guard let name,
+              let screen = NSScreen.screens.first(where: { $0.localizedName == name })
+        else { return false }
+        return !screen.isBuiltInDisplay
+    }
+
+    /// Media counts as "active" while playing, and during the short pause grace period
+    /// (`waitInterval`) the music manager already uses before it goes idle.
+    private var isMediaActiveForNotch: Bool {
+        let music = MusicManager.shared
+        return music.isPlaying || !music.isPlayerIdle
+    }
+
+    /// True when the "hide until media plays" option is on, `screenName` is an external
+    /// display, and nothing is playing. Used by the window code here and by `open()`.
+    func isNotchSuppressedOnExternalDisplay(screenName: String?) -> Bool {
+        guard Defaults[.hideExternalNotchUntilMedia] else { return false }
+        guard isExternalDisplay(named: screenName) else { return false }
+        return !isMediaActiveForNotch
+    }
+
+    /// Single-window mode: the window is hidden when the preferred display isn't connected
+    /// and automatic display switching is off (mirrors `adjustWindowPosition`).
+    private var singleWindowHiddenByDisplayChoice: Bool {
+        guard !Defaults[.showOnAllDisplays] else { return false }
+        let preferredPresent = NSScreen.screens.contains { $0.localizedName == coordinator.preferredScreen }
+        return !preferredPresent && !Defaults[.automaticallySwitchDisplay]
+    }
+
+    /// Fades each notch window to its correct visibility and updates click-through.
+    private func applyNotchWindowVisibility(animated: Bool, duration: TimeInterval = 0.3) {
+        guard !windowsHiddenForLock else { return }
+
+        for entry in notchWindowEntries() {
+            let suppressed = isNotchSuppressedOnExternalDisplay(screenName: entry.screenName)
+            let target: CGFloat = (suppressed || singleWindowHiddenByDisplayChoice) ? 0 : 1
+
+            entry.window.ignoresMouseEvents = suppressed
+
+            if suppressed, let viewModel = entry.viewModel, viewModel.notchState == .open {
+                viewModel.close()
+            }
+
+            guard abs(entry.window.alphaValue - target) > 0.01 else { continue }
+
+            if animated {
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = duration
+                    context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                    entry.window.animator().alphaValue = target
+                }
+            } else {
+                entry.window.alphaValue = target
+            }
+        }
+    }
+
+    func refreshExternalDisplayVisibility(animated: Bool = true) {
+        applyNotchWindowVisibility(animated: animated)
+    }
+
     private func cleanupWindows(shouldInvert: Bool = false) {
         if shouldInvert ? !Defaults[.showOnAllDisplays] : Defaults[.showOnAllDisplays] {
             for (screen, window) in windows {
@@ -767,6 +869,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.syncNotchSpaceMembership()
             }
         }.store(in: &cancellables)
+
+        // External displays: hide the notch until media is playing.
+        Defaults.publisher(.hideExternalNotchUntilMedia, options: []).sink { [weak self] _ in
+            DispatchQueue.main.async { [weak self] in
+                self?.refreshExternalDisplayVisibility()
+            }
+        }.store(in: &cancellables)
+
+        Publishers.CombineLatest(MusicManager.shared.$isPlaying, MusicManager.shared.$isPlayerIdle)
+            .map { isPlaying, isIdle in isPlaying || !isIdle }
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.refreshExternalDisplayVisibility()
+            }
+            .store(in: &cancellables)
         
         // Observe minimalistic UI setting changes - trigger window resize
         Defaults.publisher(.enableMinimalisticUI, options: []).sink { [weak self] _ in
@@ -1415,6 +1533,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
+
+        // Re-apply external-display / display-choice visibility after any (re)positioning.
+        applyNotchWindowVisibility(animated: false)
     }
     
     @objc func togglePopover(_ sender: Any?) {

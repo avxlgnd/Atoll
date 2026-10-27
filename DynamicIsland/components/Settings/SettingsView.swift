@@ -711,6 +711,7 @@ struct SettingsView: View {
             SettingsSearchEntry(tab: .general, title: "Enable haptics", keywords: ["haptic", "feedback"], highlightID: SettingsTab.general.highlightID(for: "Enable haptics")),
             SettingsSearchEntry(tab: .general, title: "Open notch on hover", keywords: ["hover to open", "auto open"], highlightID: SettingsTab.general.highlightID(for: "Open notch on hover")),
             SettingsSearchEntry(tab: .general, title: "External display style", keywords: ["dynamic island", "pill", "external display", "non-notch", "floating", "capsule"], highlightID: SettingsTab.general.highlightID(for: "External display style")),
+            SettingsSearchEntry(tab: .general, title: "Hide on external displays until media plays", keywords: ["hide", "external", "monitor", "media", "playing", "music"], highlightID: SettingsTab.general.highlightID(for: "Hide on external displays until media plays")),
             SettingsSearchEntry(tab: .general, title: "Hide until hovered", keywords: ["hide", "hover", "external", "non-notch", "auto hide", "slide"], highlightID: SettingsTab.general.highlightID(for: "Hide until hovered")),
             SettingsSearchEntry(tab: .general, title: "Notch display height", keywords: ["display height", "menu bar size"], highlightID: SettingsTab.general.highlightID(for: "Notch display height")),
 
@@ -1333,6 +1334,13 @@ struct GeneralSettings: View {
             }
             .settingsHighlight(id: highlightID("Hide until hovered"))
             Text("When enabled, the notch slides up and hides on external (non-notch) displays until you hover over it.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Defaults.Toggle(key: .hideExternalNotchUntilMedia) {
+                Text("Hide on external displays until media plays")
+            }
+            .settingsHighlight(id: highlightID("Hide on external displays until media plays"))
+            Text("When enabled, the notch stays hidden on external displays until music or other media is playing, then fades in. It hides again shortly after playback stops.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         } header: {
@@ -5106,7 +5114,7 @@ struct LockScreenSettings: View {
             } header: {
                 Text("Live Activity & Feedback")
             } footer: {
-                Text("Controls whether Dynamic Island mirrors lock/unlock events with its own live activity and audible chimes.")
+                Text("Controls whether Dynamic Island mirrors lock/unlock events with its own live activity and audible chimes. With the live activity on, the notch shows the lock animation while locked, disappears when you unlock, and comes back 1.5 seconds later. On external displays the lock animation shows for half a second and then fades out.")
             }
 
             Section {

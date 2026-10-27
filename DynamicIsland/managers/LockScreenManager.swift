@@ -28,6 +28,23 @@ enum LockScreenAnimationTimings {
     static let unlockCollapse: TimeInterval = 0.82
     static let postUnlockMusicHUDPause: TimeInterval = 1.0
     static let postUnlockMusicHUDReveal: TimeInterval = 0.34
+
+    /// After unlocking, the notch stays gone for this long (counted from the moment the
+    /// lock-screen notch has finished disappearing) before it comes back.
+    static let postUnlockNotchReappearGap: TimeInterval = 1.5
+    /// Fade-in used when the notch comes back after unlocking.
+    static let postUnlockNotchFadeIn: TimeInterval = 0.35
+
+    /// External displays: how long the lock animation stays visible after locking...
+    static let externalLockVisibleDuration: TimeInterval = 0.5
+    /// ...and how long the fade-out that follows takes.
+    static let externalLockFadeDuration: TimeInterval = 0.3
+
+    /// Total time the lock-screen notch is on screen after an unlock
+    /// (unlock animation + collapse/fade-out).
+    static var unlockOverlayTotalDuration: TimeInterval {
+        unlockCollapse + unlockCollapse + 0.02
+    }
 }
 
 @MainActor
@@ -173,6 +190,9 @@ class LockScreenManager: ObservableObject {
         updateIdleState(locked: false)
         isLocked = false
         stopLockStatePolling()
+        // Drive the "notch comes back" timer from the earliest unlock signal so it stays
+        // in sync with the lock-screen notch animation (idempotent on the app side).
+        AppDelegate.shared?.scheduleNotchRestoreAfterUnlock()
         postUnlockMusicHUDTask?.cancel()
         shouldDelayPostUnlockMusicHUD = Defaults[.enableLockScreenLiveActivity]
 

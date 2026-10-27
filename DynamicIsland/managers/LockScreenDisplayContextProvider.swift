@@ -19,6 +19,16 @@
 import AppKit
 import CoreGraphics
 
+extension NSScreen {
+    /// True for the MacBook's own panel; false for external monitors.
+    var isBuiltInDisplay: Bool {
+        guard let number = deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else {
+            return false
+        }
+        return CGDisplayIsBuiltin(CGDirectDisplayID(number.uint32Value)) != 0
+    }
+}
+
 struct LockScreenDisplayContext {
     let screen: NSScreen
     let frame: NSRect

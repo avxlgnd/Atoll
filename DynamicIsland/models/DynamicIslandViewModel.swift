@@ -332,6 +332,10 @@ class DynamicIslandViewModel: NSObject, ObservableObject {
     }
 
     func open() {
+        // The notch is hidden on this (external) display until media plays; don't open an invisible notch.
+        if AppDelegate.shared?.isNotchSuppressedOnExternalDisplay(screenName: screen) == true {
+            return
+        }
         let targetSize = calculateDynamicNotchSize()
 
         let applyWindowResize: () -> Void = {
