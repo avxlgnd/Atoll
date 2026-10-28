@@ -271,11 +271,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// How long after an unlock the notch comes back. With the lock-screen live activity on,
     /// the notch is gone while the unlock animation plays and collapses, then stays gone for
-    /// `postUnlockNotchReappearGap` (1.5s) before it fades back in.
+    /// the "notch reappears after unlocking" setting (default 1.5s) before it fades back in.
     private func notchReappearDelayAfterUnlock() -> TimeInterval {
         guard Defaults[.enableLockScreenLiveActivity] else { return 1.0 }
-        return LockScreenAnimationTimings.unlockOverlayTotalDuration
-            + LockScreenAnimationTimings.postUnlockNotchReappearGap
+        // If the lock animation is off for this display there is no unlock animation to wait for.
+        let playsUnlockAnimation = LockAnimationConfig.forLockScreenDisplay().enabled
+            && Defaults[.helloAnimationTrigger] != .unlock
+        let overlayDuration = playsUnlockAnimation
+            ? LockScreenAnimationTimings.unlockOverlayTotalDuration
+            : 0
+        return overlayDuration + max(Defaults[.postUnlockReappearDelay], 0)
     }
 
     /// Schedules the notch to reappear after an unlock. Safe to call more than once per
@@ -291,6 +296,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self.adjustWindowPosition()
             self.restoreWindowsAfterLock()
             self.fadeInNotchWindows(duration: LockScreenAnimationTimings.postUnlockNotchFadeIn)
+            self.updateNotchClickThrough()
+            if Defaults[.helloAnimationTrigger] == .unlock {
+                self.playHelloAnimation()
+            }
         }
         unlockRestoreWorkItem = item
         DispatchQueue.main.asyncAfter(deadline: .now() + notchReappearDelayAfterUnlock(), execute: item)
@@ -325,7 +334,74 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         applyNotchWindowVisibility(animated: true, duration: duration)
     }
 
-    // MARK: - External display: hide until media plays
+    // MARK: - Hello animation
+
+    /// Plays the hello animation (opens the notch with it, then closes it again).
+    func playHelloAnimation() {
+        guard !coordinator.helloAnimationActive else { return }
+        coordinator.helloAnimationActive = true
+        // Safety net: never leave the flag stuck if the notch could not open.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
+            self?.coordinator.helloAnimationActive = false
+        }
+    }
+
+    // MARK: - Click-through around the closed notch
+
+    private var clickThroughMonitors: [Any] = []
+
+    private func installNotchClickThroughMonitors() {
+        let mask: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged, .rightMouseDragged]
+        if let global = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { [weak self] _ in
+            self?.updateNotchClickThrough()
+        }) {
+            clickThroughMonitors.append(global)
+        }
+        if let local = NSEvent.addLocalMonitorForEvents(matching: mask, handler: { [weak self] event in
+            self?.updateNotchClickThrough()
+            return event
+        }) {
+            clickThroughMonitors.append(local)
+        }
+    }
+
+    /// The notch window is as large as the open notch, even while the notch is closed.
+    /// The empty part would swallow clicks meant for the apps underneath, so while the notch
+    /// is closed the window ignores the mouse unless the pointer is on (or right next to) it.
+    func updateNotchClickThrough() {
+        let mouse = NSEvent.mouseLocation
+        let enabled = Defaults[.clickThroughNotchArea] && !windowsHiddenForLock
+
+        for entry in notchWindowEntries() {
+            let window = entry.window
+            var capture = true
+
+            if enabled, let viewModel = entry.viewModel,
+               viewModel.notchState == .closed,
+               !viewModel.visibleNotchFrame.isEmpty
+            {
+                let local = viewModel.visibleNotchFrame
+                let frame = window.frame
+                // Hosting coordinates (origin top-left) to screen coordinates (origin bottom-left).
+                let notch = NSRect(
+                    x: frame.minX + local.minX,
+                    y: frame.maxY - local.maxY,
+                    width: local.width,
+                    height: local.height
+                )
+                let nearNotch = notch.insetBy(dx: -20, dy: -20)
+                // Always keep a strip along the very top edge so a slid-up notch can be revealed.
+                let topStrip = NSRect(x: notch.minX - 20, y: frame.maxY - 8, width: notch.width + 40, height: 40)
+                capture = nearNotch.contains(mouse) || topStrip.contains(mouse)
+            }
+
+            if window.ignoresMouseEvents == capture {
+                window.ignoresMouseEvents = !capture
+            }
+        }
+    }
+
+    // MARK: - Window visibility
 
     private typealias NotchWindowEntry = (window: NSWindow, screenName: String?, viewModel: DynamicIslandViewModel?)
 
@@ -341,28 +417,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return []
     }
 
-    private func isExternalDisplay(named name: String?) -> Bool {
-        guard let name,
-              let screen = NSScreen.screens.first(where: { $0.localizedName == name })
-        else { return false }
-        return !screen.isBuiltInDisplay
-    }
-
-    /// Media counts as "active" while playing, and during the short pause grace period
-    /// (`waitInterval`) the music manager already uses before it goes idle.
-    private var isMediaActiveForNotch: Bool {
-        let music = MusicManager.shared
-        return music.isPlaying || !music.isPlayerIdle
-    }
-
-    /// True when the "hide until media plays" option is on, `screenName` is an external
-    /// display, and nothing is playing. Used by the window code here and by `open()`.
-    func isNotchSuppressedOnExternalDisplay(screenName: String?) -> Bool {
-        guard Defaults[.hideExternalNotchUntilMedia] else { return false }
-        guard isExternalDisplay(named: screenName) else { return false }
-        return !isMediaActiveForNotch
-    }
-
     /// Single-window mode: the window is hidden when the preferred display isn't connected
     /// and automatic display switching is off (mirrors `adjustWindowPosition`).
     private var singleWindowHiddenByDisplayChoice: Bool {
@@ -371,20 +425,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return !preferredPresent && !Defaults[.automaticallySwitchDisplay]
     }
 
-    /// Fades each notch window to its correct visibility and updates click-through.
+    /// Fades each notch window to its correct visibility.
     private func applyNotchWindowVisibility(animated: Bool, duration: TimeInterval = 0.3) {
         guard !windowsHiddenForLock else { return }
 
+        let target: CGFloat = singleWindowHiddenByDisplayChoice ? 0 : 1
+
         for entry in notchWindowEntries() {
-            let suppressed = isNotchSuppressedOnExternalDisplay(screenName: entry.screenName)
-            let target: CGFloat = (suppressed || singleWindowHiddenByDisplayChoice) ? 0 : 1
-
-            entry.window.ignoresMouseEvents = suppressed
-
-            if suppressed, let viewModel = entry.viewModel, viewModel.notchState == .open {
-                viewModel.close()
-            }
-
             guard abs(entry.window.alphaValue - target) > 0.01 else { continue }
 
             if animated {
@@ -397,10 +444,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 entry.window.alphaValue = target
             }
         }
-    }
-
-    func refreshExternalDisplayVisibility(animated: Bool = true) {
-        applyNotchWindowVisibility(animated: animated)
     }
 
     private func cleanupWindows(shouldInvert: Bool = false) {
@@ -667,6 +710,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // "Every time the app opens": reuse the hello animation that normally only runs on first launch.
+        if Defaults[.helloAnimationTrigger] == .appOpen, !coordinator.firstLaunch {
+            playHelloAnimation()
+        }
+
         let userInfo: [String: Any] = [
             AtollDistributedNotifications.UserInfoKey.sourcePID: NSNumber(value: ProcessInfo.processInfo.processIdentifier)
         ]
@@ -870,21 +918,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }.store(in: &cancellables)
 
-        // External displays: hide the notch until media is playing.
-        Defaults.publisher(.hideExternalNotchUntilMedia, options: []).sink { [weak self] _ in
+        installNotchClickThroughMonitors()
+        Defaults.publisher(.clickThroughNotchArea, options: []).sink { [weak self] _ in
             DispatchQueue.main.async { [weak self] in
-                self?.refreshExternalDisplayVisibility()
+                self?.updateNotchClickThrough()
             }
         }.store(in: &cancellables)
-
-        Publishers.CombineLatest(MusicManager.shared.$isPlaying, MusicManager.shared.$isPlayerIdle)
-            .map { isPlaying, isIdle in isPlaying || !isIdle }
-            .removeDuplicates()
-            .receive(on: RunLoop.main)
-            .sink { [weak self] _ in
-                self?.refreshExternalDisplayVisibility()
-            }
-            .store(in: &cancellables)
         
         // Observe minimalistic UI setting changes - trigger window resize
         Defaults.publisher(.enableMinimalisticUI, options: []).sink { [weak self] _ in
@@ -1534,8 +1573,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // Re-apply external-display / display-choice visibility after any (re)positioning.
+        // Re-apply display-choice visibility after any (re)positioning.
         applyNotchWindowVisibility(animated: false)
+        updateNotchClickThrough()
     }
     
     @objc func togglePopover(_ sender: Any?) {

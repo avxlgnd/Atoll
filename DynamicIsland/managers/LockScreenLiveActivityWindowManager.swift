@@ -212,6 +212,13 @@ class LockScreenLiveActivityWindowManager {
         hideTask?.cancel()
         guard let context = lockContext() else { return }
 
+        let config = LockAnimationConfig.forBuiltInDisplay(context.screen.isBuiltInDisplay)
+        guard config.enabled else {
+            // Lock animation turned off for this kind of display: nothing is shown.
+            hideWithAnimation(duration: 0.1)
+            return
+        }
+
         let collapsedScale = LockScreenLiveActivityOverlay.collapsedScale(for: context.notchSize, isDynamicIslandMode: isDynamicIslandMode)
 
         overlayAnimator.update(isLocked: true)
@@ -231,14 +238,14 @@ class LockScreenLiveActivityWindowManager {
 
         print("[\(timestamp())] LockScreenLiveActivityWindowManager: showing locked state")
 
-        // External display: show the lock animation briefly, then fade it out
-        // instead of leaving it up for the whole time the Mac is locked.
-        if !context.screen.isBuiltInDisplay {
+        // Optionally fade the lock animation out after a while instead of leaving it up
+        // for the whole time the Mac is locked.
+        if config.autoHide {
             hideTask = Task { [weak self] in
-                try? await Task.sleep(for: .seconds(LockScreenAnimationTimings.externalLockVisibleDuration))
+                try? await Task.sleep(for: .seconds(config.visibleDuration))
                 guard let self, !Task.isCancelled else { return }
                 await MainActor.run {
-                    self.hideWithAnimation(duration: LockScreenAnimationTimings.externalLockFadeDuration)
+                    self.hideWithAnimation(duration: config.fadeDuration)
                 }
             }
         }
@@ -247,6 +254,14 @@ class LockScreenLiveActivityWindowManager {
     func showUnlockAndScheduleHide() {
         hideTask?.cancel()
         guard let context = lockContext() else { return }
+
+        // The hello animation can replace the default unlock animation.
+        guard LockAnimationConfig.forBuiltInDisplay(context.screen.isBuiltInDisplay).enabled,
+              Defaults[.helloAnimationTrigger] != .unlock
+        else {
+            hideWithAnimation(duration: 0.1)
+            return
+        }
 
         overlayModel.scale = 1
         overlayModel.opacity = 1

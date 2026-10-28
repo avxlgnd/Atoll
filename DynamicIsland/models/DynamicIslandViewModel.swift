@@ -332,10 +332,6 @@ class DynamicIslandViewModel: NSObject, ObservableObject {
     }
 
     func open() {
-        // The notch is hidden on this (external) display until media plays; don't open an invisible notch.
-        if AppDelegate.shared?.isNotchSuppressedOnExternalDisplay(screenName: screen) == true {
-            return
-        }
         let targetSize = calculateDynamicNotchSize()
 
         let applyWindowResize: () -> Void = {
@@ -408,12 +404,19 @@ class DynamicIslandViewModel: NSObject, ObservableObject {
 
     private var helloCloseScheduled = false
 
+    /// Frame of the visible notch shape in the window's coordinate space (origin top-left).
+    /// Plain property on purpose (not @Published): it changes every animation frame and is
+    /// only read by the click-through logic in AppDelegate.
+    var visibleNotchFrame: CGRect = .zero
+
     func closeHello() {
         guard !helloCloseScheduled else { return }
         helloCloseScheduled = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) { [weak self] in
             guard let self else { return }
+            self.helloCloseScheduled = false
             self.coordinator.firstLaunch = false
+            self.coordinator.helloAnimationActive = false
             withAnimation(self.animationLibrary.animation) {
                 self.close()
             }

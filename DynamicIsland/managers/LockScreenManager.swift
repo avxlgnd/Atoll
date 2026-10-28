@@ -23,22 +23,45 @@ import Defaults
 import SwiftUI
 import AVFoundation
 
+/// The user's lock animation settings for one kind of display (MacBook panel or external monitor).
+struct LockAnimationConfig {
+    var enabled: Bool
+    var autoHide: Bool
+    var visibleDuration: TimeInterval
+    var fadeDuration: TimeInterval
+
+    static func forBuiltInDisplay(_ isBuiltIn: Bool) -> LockAnimationConfig {
+        if isBuiltIn {
+            return LockAnimationConfig(
+                enabled: Defaults[.lockAnimationBuiltIn],
+                autoHide: Defaults[.lockAnimationAutoHideBuiltIn],
+                visibleDuration: max(Defaults[.lockAnimationVisibleBuiltIn], 0),
+                fadeDuration: max(Defaults[.lockAnimationFadeBuiltIn], 0.05)
+            )
+        }
+        return LockAnimationConfig(
+            enabled: Defaults[.lockAnimationExternal],
+            autoHide: Defaults[.lockAnimationAutoHideExternal],
+            visibleDuration: max(Defaults[.lockAnimationVisibleExternal], 0),
+            fadeDuration: max(Defaults[.lockAnimationFadeExternal], 0.05)
+        )
+    }
+
+    /// The lock animation is drawn on the MacBook's own display when there is one,
+    /// otherwise on the main (external) display.
+    static func forLockScreenDisplay() -> LockAnimationConfig {
+        forBuiltInDisplay(NSScreen.screens.contains { $0.isBuiltInDisplay })
+    }
+}
+
 enum LockScreenAnimationTimings {
     static let lockExpand: TimeInterval = 0.45
     static let unlockCollapse: TimeInterval = 0.82
     static let postUnlockMusicHUDPause: TimeInterval = 1.0
     static let postUnlockMusicHUDReveal: TimeInterval = 0.34
 
-    /// After unlocking, the notch stays gone for this long (counted from the moment the
-    /// lock-screen notch has finished disappearing) before it comes back.
-    static let postUnlockNotchReappearGap: TimeInterval = 1.5
     /// Fade-in used when the notch comes back after unlocking.
     static let postUnlockNotchFadeIn: TimeInterval = 0.35
-
-    /// External displays: how long the lock animation stays visible after locking...
-    static let externalLockVisibleDuration: TimeInterval = 0.5
-    /// ...and how long the fade-out that follows takes.
-    static let externalLockFadeDuration: TimeInterval = 0.3
 
     /// Total time the lock-screen notch is on screen after an unlock
     /// (unlock animation + collapse/fade-out).

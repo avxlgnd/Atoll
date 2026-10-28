@@ -388,6 +388,22 @@ enum ThirdPartyDDCProvider: String, CaseIterable, Codable, Defaults.Serializable
     }
 }
 
+enum HelloAnimationTrigger: String, CaseIterable, Identifiable, Defaults.Serializable {
+    case firstLaunchOnly
+    case appOpen
+    case unlock
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .firstLaunchOnly: return "Only the first time the app opens"
+        case .appOpen: return "Every time the app opens"
+        case .unlock: return "When the Mac is unlocked"
+        }
+    }
+}
+
 enum HideNotchOption: String, Defaults.Serializable {
     case always
     case nowPlayingOnly
@@ -849,6 +865,23 @@ extension Defaults.Keys {
     static let hideNonNotchUntilHover = Key<Bool>("hideNonNotchUntilHover", default: false)
     /// External (non built-in) displays only: keep the notch hidden until media is playing.
     static let hideExternalNotchUntilMedia = Key<Bool>("hideExternalNotchUntilMedia", default: false)
+
+    /// When the "hello" welcome animation plays.
+    static let helloAnimationTrigger = Key<HelloAnimationTrigger>("helloAnimationTrigger", default: .firstLaunchOnly)
+    /// Let clicks pass through the transparent area of the notch window around the closed notch.
+    static let clickThroughNotchArea = Key<Bool>("clickThroughNotchArea", default: true)
+
+    // Lock screen animation, configured separately for the MacBook's own display and external displays.
+    static let lockAnimationBuiltIn = Key<Bool>("lockAnimationBuiltIn", default: true)
+    static let lockAnimationAutoHideBuiltIn = Key<Bool>("lockAnimationAutoHideBuiltIn", default: false)
+    static let lockAnimationVisibleBuiltIn = Key<Double>("lockAnimationVisibleBuiltIn", default: 0.5)
+    static let lockAnimationFadeBuiltIn = Key<Double>("lockAnimationFadeBuiltIn", default: 0.3)
+    static let lockAnimationExternal = Key<Bool>("lockAnimationExternal", default: true)
+    static let lockAnimationAutoHideExternal = Key<Bool>("lockAnimationAutoHideExternal", default: true)
+    static let lockAnimationVisibleExternal = Key<Double>("lockAnimationVisibleExternal", default: 0.5)
+    static let lockAnimationFadeExternal = Key<Double>("lockAnimationFadeExternal", default: 0.3)
+    /// How long the notch stays gone after unlocking before it fades back in.
+    static let postUnlockReappearDelay = Key<Double>("postUnlockReappearDelay", default: 1.5)
     static let notchHeightMode = Key<WindowHeightMode>(
         "notchHeightMode",
         default: WindowHeightMode.matchRealNotchSize

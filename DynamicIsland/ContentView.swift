@@ -83,6 +83,7 @@ struct ContentView: View {
     @Default(.showStandardMediaControls) var showStandardMediaControls
     @Default(.externalDisplayStyle) var externalDisplayStyle
     @Default(.hideNonNotchUntilHover) var hideNonNotchUntilHover
+    @Default(.hideExternalNotchUntilMedia) var hideExternalNotchUntilMedia
     @Default(.terminalStickyMode) var terminalStickyMode
     
     // Battery settings reactivity
@@ -402,7 +403,24 @@ struct ContentView: View {
     /// Whether the notch/island should hide off-screen when closed on a non-notch display.
     /// Temporarily reveals the notch when a sneakPeek HUD (volume, brightness, music, etc.) is active.
     private var shouldHideUntilHover: Bool {
-        hideNonNotchUntilHover && isNonNotchScreen && vm.notchState == .closed && !isSneakPeekVisibleOnCurrentScreen
+        guard vm.notchState == .closed, !isSneakPeekVisibleOnCurrentScreen else { return false }
+        let hiddenUntilHover = hideNonNotchUntilHover && isNonNotchScreen
+        let hiddenUntilMedia = hideExternalNotchUntilMedia && isExternalDisplayScreen && !isMediaActiveForNotch
+        return hiddenUntilHover || hiddenUntilMedia
+    }
+
+    /// True for any display that isn't the MacBook's built-in panel.
+    private var isExternalDisplayScreen: Bool {
+        guard let screen = NSScreen.screens.first(where: { $0.localizedName == currentScreenName }) else {
+            return false
+        }
+        return !screen.isBuiltInDisplay
+    }
+
+    /// Media counts as active while playing, and during the short pause grace period
+    /// before the music manager goes idle.
+    private var isMediaActiveForNotch: Bool {
+        musicManager.isPlaying || !musicManager.isPlayerIdle
     }
 
     /// Whether the fallback top-edge hover detector should run.
@@ -526,6 +544,12 @@ struct ContentView: View {
             .frame(alignment: .top)
             .padding(.horizontal, notchHorizontalPadding)
             .padding([.horizontal, .bottom], vm.notchState == .open ? 12 : 0)
+            .background(
+                NotchFrameReader { frame in
+                    vm.visibleNotchFrame = frame
+                    AppDelegate.shared?.updateNotchClickThrough()
+                }
+            )
             .background(.black)
             .clipShape(resolvedClipShape)
             .compositingGroup()
@@ -607,7 +631,7 @@ struct ContentView: View {
                 : 0
             )
             .onAppear(perform: {
-                if coordinator.firstLaunch {
+                if coordinator.isHelloActive {
                     // Single open during first launch; closeHello() handles the timed close.
                     runAfter(1) {
                         withAnimation(vm.animation) {
@@ -616,6 +640,15 @@ struct ContentView: View {
                     }
                 }
             })
+            .onChange(of: coordinator.helloAnimationActive) { _, active in
+                // Hello animation requested after launch (for example on unlock).
+                guard active, vm.notchState == .closed else { return }
+                runAfter(0.4) {
+                    withAnimation(vm.animation) {
+                        openNotch()
+                    }
+                }
+            }
             .onChange(of: vm.notchState) { _, newState in
                 // Update smart monitoring based on notch state
                 if enableStatsFeature {
@@ -867,7 +900,7 @@ struct ContentView: View {
       func NotchLayout() -> some View {
           VStack(alignment: .leading) {
               VStack(alignment: .leading) {
-                  if coordinator.firstLaunch {
+                  if coordinator.isHelloActive {
                       Spacer()
                       HelloAnimation().frame(width: 200, height: 80).onAppear(perform: {
                           vm.closeHello()
@@ -1899,7 +1932,7 @@ struct ContentView: View {
             && !isMusicHUDDeferredAfterUnlock
             && !isCurrentScreenExpansionVisible
             && (!musicManager.isPlayerIdle || musicManager.bundleIdentifier != nil)
-            && !coordinator.firstLaunch
+            && !coordinator.isHelloActive
     }
 
     private func handleClosedMusicWaveformTapIfNeeded() -> Bool {
@@ -2159,7 +2192,7 @@ struct ContentView: View {
     }
 
     private func shouldPreventAutoClose() -> Bool {
-        coordinator.firstLaunch || hasAnyActivePopovers() || vm.isAutoCloseSuppressed || SharingStateManager.shared.preventNotchClose || (Defaults[.terminalStickyMode] && coordinator.currentView == .terminal)
+        coordinator.isHelloActive || hasAnyActivePopovers() || vm.isAutoCloseSuppressed || SharingStateManager.shared.preventNotchClose || (Defaults[.terminalStickyMode] && coordinator.currentView == .terminal)
     }
     
     // Helper to prevent rapid haptic feedback
@@ -2971,5 +3004,18 @@ struct FullScreenDropDelegate: DropDelegate {
         isTargeted = false
         onDrop()
         return true
+    }
+}
+
+/// Reports the frame of the view it is attached behind, in the window's coordinate space.
+private struct NotchFrameReader: View {
+    let onChange: (CGRect) -> Void
+
+    var body: some View {
+        GeometryReader { proxy in
+            Color.clear
+                .onAppear { onChange(proxy.frame(in: .global)) }
+                .onChange(of: proxy.frame(in: .global)) { _, newValue in onChange(newValue) }
+        }
     }
 }

@@ -1047,6 +1047,7 @@ struct GeneralSettings: View {
     @Default(.showEmojis) var showEmojis
     @Default(.gestureSensitivity) var gestureSensitivity
     @Default(.minimumHoverDuration) var minimumHoverDuration
+    @Default(.helloAnimationTrigger) var helloAnimationTrigger
     @Default(.nonNotchHeight) var nonNotchHeight
     @Default(.nonNotchHeightMode) var nonNotchHeightMode
     @Default(.notchHeight) var notchHeight
@@ -1336,11 +1337,27 @@ struct GeneralSettings: View {
             Text("When enabled, the notch slides up and hides on external (non-notch) displays until you hover over it.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            Picker("Play hello animation", selection: $helloAnimationTrigger) {
+                ForEach(HelloAnimationTrigger.allCases) { option in
+                    Text(option.title).tag(option)
+                }
+            }
+            .settingsHighlight(id: highlightID("Play hello animation"))
+            Text("The hello animation opens the notch with a greeting for a few seconds. \"When the Mac is unlocked\" plays it after the notch comes back instead of the lock icon's unlock animation.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Defaults.Toggle(key: .clickThroughNotchArea) {
+                Text("Let clicks pass through the empty area around the notch")
+            }
+            .settingsHighlight(id: highlightID("Let clicks pass through the empty area around the notch"))
+            Text("While the notch is closed, the invisible area where it expands no longer blocks clicks on apps and menus underneath it.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
             Defaults.Toggle(key: .hideExternalNotchUntilMedia) {
                 Text("Hide on external displays until media plays")
             }
             .settingsHighlight(id: highlightID("Hide on external displays until media plays"))
-            Text("When enabled, the notch stays hidden on external displays until music or other media is playing, then fades in. It hides again shortly after playback stops.")
+            Text("When enabled, the notch slides up out of view on external displays until music or other media is playing, then slides back down. It hides again shortly after playback stops. Move the pointer to the top edge of the screen to bring it back at any time.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         } header: {
@@ -4979,6 +4996,15 @@ struct Appearance: View {
 }
 
 struct LockScreenSettings: View {
+    @Default(.lockAnimationBuiltIn) private var lockAnimationBuiltIn
+    @Default(.lockAnimationAutoHideBuiltIn) private var lockAnimationAutoHideBuiltIn
+    @Default(.lockAnimationVisibleBuiltIn) private var lockAnimationVisibleBuiltIn
+    @Default(.lockAnimationFadeBuiltIn) private var lockAnimationFadeBuiltIn
+    @Default(.lockAnimationExternal) private var lockAnimationExternal
+    @Default(.lockAnimationAutoHideExternal) private var lockAnimationAutoHideExternal
+    @Default(.lockAnimationVisibleExternal) private var lockAnimationVisibleExternal
+    @Default(.lockAnimationFadeExternal) private var lockAnimationFadeExternal
+    @Default(.postUnlockReappearDelay) private var postUnlockReappearDelay
     @ObservedObject private var calendarManager = CalendarManager.shared
     @ObservedObject private var previewManager = LockScreenWidgetPreviewManager.shared
     @Default(.lockScreenGlassStyle) private var lockScreenGlassStyle
@@ -5100,6 +5126,46 @@ struct LockScreenSettings: View {
         )
     }
 
+    @ViewBuilder
+    private func lockAnimationSection(
+        title: String,
+        enabled: Binding<Bool>,
+        autoHide: Binding<Bool>,
+        visible: Binding<Double>,
+        fade: Binding<Double>
+    ) -> some View {
+        Section {
+            Toggle("Play lock animation", isOn: enabled)
+            if enabled.wrappedValue {
+                Toggle("Fade out automatically after locking", isOn: autoHide)
+                if autoHide.wrappedValue {
+                    Slider(value: visible, in: 0...5, step: 0.1) {
+                        HStack {
+                            Text("Stay visible for")
+                            Spacer()
+                            Text("\(visible.wrappedValue, specifier: "%.1f")s")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Slider(value: fade, in: 0.1...2, step: 0.1) {
+                        HStack {
+                            Text("Fade-out duration")
+                            Spacer()
+                            Text("\(fade.wrappedValue, specifier: "%.1f")s")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+        } header: {
+            Text(title)
+        } footer: {
+            Text(enabled.wrappedValue
+                 ? "Turn off \"Fade out automatically\" to keep the animation up until you unlock."
+                 : "The notch disappears immediately when you lock, with no lock or unlock animation on this display.")
+        }
+    }
+
     var body: some View {
         Form {
             Section {
@@ -5114,8 +5180,39 @@ struct LockScreenSettings: View {
             } header: {
                 Text("Live Activity & Feedback")
             } footer: {
-                Text("Controls whether Dynamic Island mirrors lock/unlock events with its own live activity and audible chimes. With the live activity on, the notch shows the lock animation while locked, disappears when you unlock, and comes back 1.5 seconds later. On external displays the lock animation shows for half a second and then fades out.")
+                Text("Controls whether Dynamic Island mirrors lock/unlock events with its own live activity and audible chimes. With the live activity on, the notch shows the lock animation while locked, disappears when you unlock, and comes back after the delay below.")
             }
+
+            Section {
+                Slider(value: $postUnlockReappearDelay, in: 0...5, step: 0.1) {
+                    HStack {
+                        Text("Notch reappears after unlocking")
+                        Spacer()
+                        Text("\(postUnlockReappearDelay, specifier: "%.1f")s")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } header: {
+                Text("Unlock Timing")
+            } footer: {
+                Text("How long the notch stays gone, after the unlock animation finishes, before it fades back in.")
+            }
+
+            lockAnimationSection(
+                title: "Lock Animation: MacBook Display",
+                enabled: $lockAnimationBuiltIn,
+                autoHide: $lockAnimationAutoHideBuiltIn,
+                visible: $lockAnimationVisibleBuiltIn,
+                fade: $lockAnimationFadeBuiltIn
+            )
+
+            lockAnimationSection(
+                title: "Lock Animation: External Displays",
+                enabled: $lockAnimationExternal,
+                autoHide: $lockAnimationAutoHideExternal,
+                visible: $lockAnimationVisibleExternal,
+                fade: $lockAnimationFadeExternal
+            )
 
             Section {
                 Button(previewManager.isPreviewVisible ? "Hide lock screen preview" : "Preview lock screen widgets") {
