@@ -27,10 +27,27 @@ import SwiftUI
 let downloadSneakSize: CGSize = .init(width: 65, height: 1)
 let batterySneakSize: CGSize = .init(width: 160, height: 1)
 
+/// Open size used to size the notch WINDOW: wide enough for whichever style is in use.
+/// (The view itself uses `openNotchSizeForScreen` so each style gets its own width.)
 var openNotchSize: CGSize {
-    let storedWidth = Defaults[.openNotchWidth]
+    var storedWidth = Defaults[.openNotchWidth]
+    if Defaults[.externalDisplayStyle] == .dynamicIsland {
+        storedWidth = max(storedWidth, Defaults[.openIslandWidth])
+    }
     let minWidth = currentRecommendedMinimumNotchWidth()
     let maxWidth = maxAllowedNotchWidth()
+    let width = min(max(storedWidth, minWidth), maxWidth)
+    return .init(width: width, height: 200)
+}
+
+/// Open size for a specific screen, using the Dynamic Island width when that screen
+/// renders the Dynamic Island style and the notch width otherwise.
+func openNotchSizeForScreen(_ screenName: String?) -> CGSize {
+    let storedWidth = shouldUseDynamicIslandMode(for: screenName)
+        ? Defaults[.openIslandWidth]
+        : Defaults[.openNotchWidth]
+    let minWidth = currentRecommendedMinimumNotchWidth()
+    let maxWidth = maxAllowedNotchWidth(for: screenName)
     let width = min(max(storedWidth, minWidth), maxWidth)
     return .init(width: width, height: 200)
 }
@@ -119,6 +136,13 @@ func enforceMinimumNotchWidth() {
     if width > maxWidth { width = maxWidth }
     if Defaults[.openNotchWidth] != width {
         Defaults[.openNotchWidth] = width
+    }
+
+    var islandWidth = Defaults[.openIslandWidth]
+    if islandWidth < minWidth { islandWidth = minWidth }
+    if islandWidth > maxWidth { islandWidth = maxWidth }
+    if Defaults[.openIslandWidth] != islandWidth {
+        Defaults[.openIslandWidth] = islandWidth
     }
 }
 private let minimalisticBaseOpenNotchSize: CGSize = .init(width: 420, height: 180)
@@ -281,7 +305,10 @@ let dynamicIslandPillCornerRadiusInsets: (opened: CGFloat, closed: (standard: CG
 /// Vertical offset from the top screen edge for the Dynamic Island pill.
 /// Creates a visual gap so the pill floats below the menu bar, mimicking
 /// the iPhone's Dynamic Island detachment from the physical screen edge.
-let dynamicIslandTopOffset: CGFloat = 6
+/// Adjustable in Settings → Appearance (default 0 keeps the pill within the menu bar height).
+var dynamicIslandTopOffset: CGFloat {
+    CGFloat(Defaults[.islandVerticalOffset])
+}
 
 /// Extra horizontal padding applied OUTSIDE the pill clip shape in Dynamic
 /// Island mode so the drop shadow has room to render without being clipped
@@ -319,6 +346,11 @@ func getClosedNotchSize(screen: String? = nil) -> CGSize {
     }
 
     // Check if the screen is available
+    // Dynamic Island style has its own closed width.
+    if shouldUseDynamicIslandMode(for: selectedScreen?.localizedName) {
+        notchWidth = Defaults[.closedIslandWidth]
+    }
+
     if let screen = selectedScreen {
         // Calculate and set the exact width of the notch
         if let topLeftNotchpadding: CGFloat = screen.auxiliaryTopLeftArea?.width,

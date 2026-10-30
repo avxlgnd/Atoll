@@ -241,8 +241,8 @@ class DynamicIslandViewModel: NSObject, ObservableObject {
             .store(in: &cancellables)
 
         Defaults.publisher(.openNotchWidth, options: [])
-            .map { $0.newValue }
-            .removeDuplicates()
+            .map { _ in () }
+            .merge(with: Defaults.publisher(.openIslandWidth, options: []).map { _ in () })
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 guard let self else { return }
@@ -358,7 +358,7 @@ class DynamicIslandViewModel: NSObject, ObservableObject {
     }
     
     private func calculateDynamicNotchSize() -> CGSize {
-        let baseSize = Defaults[.enableMinimalisticUI] ? minimalisticOpenNotchSize(isDynamicIslandMode: shouldUseDynamicIslandMode(for: screen)) : openNotchSize
+        let baseSize = Defaults[.enableMinimalisticUI] ? minimalisticOpenNotchSize(isDynamicIslandMode: shouldUseDynamicIslandMode(for: screen)) : openNotchSizeForScreen(screen)
         var adjustedSize = baseSize
 
         if coordinator.currentView == .notes || coordinator.currentView == .clipboard {

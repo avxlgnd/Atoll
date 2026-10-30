@@ -275,12 +275,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func notchReappearDelayAfterUnlock() -> TimeInterval {
         guard Defaults[.enableLockScreenLiveActivity] else { return 1.0 }
         // If the lock animation is off for this display there is no unlock animation to wait for.
-        let playsUnlockAnimation = LockAnimationConfig.forLockScreenDisplay().enabled
+        let config = LockAnimationConfig.forLockScreenDisplay()
+        let playsUnlockAnimation = config.unlockEnabled
             && Defaults[.helloAnimationTrigger] != .unlock
-        let overlayDuration = playsUnlockAnimation
-            ? LockScreenAnimationTimings.unlockOverlayTotalDuration
-            : 0
-        return overlayDuration + max(Defaults[.postUnlockReappearDelay], 0)
+        let overlayDuration = playsUnlockAnimation ? config.unlockOverlayTotalDuration : 0
+        return overlayDuration + max(config.reappearDelay, 0)
     }
 
     /// Schedules the notch to reappear after an unlock. Safe to call more than once per
@@ -661,7 +660,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         var adjusted = baseSize
         adjusted.width += dynamicIslandShadowInset * 2
-        adjusted.height += dynamicIslandTopOffset
+        // Top offset plus the bottom shadow inset, so the pill gets the same inner height as the notch.
+        adjusted.height += dynamicIslandTopOffset + dynamicIslandShadowInset
         return adjusted
     }
 
@@ -850,6 +850,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         Defaults.publisher(.openNotchWidth, options: []).sink { [weak self] _ in
             self?.debouncedUpdateWindowSize()
+        }.store(in: &cancellables)
+
+        Defaults.publisher(.openIslandWidth, options: []).sink { [weak self] _ in
+            self?.debouncedUpdateWindowSize()
+        }.store(in: &cancellables)
+
+        Defaults.publisher(.islandVerticalOffset, options: []).sink { [weak self] _ in
+            DispatchQueue.main.async { [weak self] in
+                self?.adjustWindowPosition()
+                self?.debouncedUpdateWindowSize()
+            }
         }.store(in: &cancellables)
 
         // Observe terminal settings changes

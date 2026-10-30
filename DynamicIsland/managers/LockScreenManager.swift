@@ -29,6 +29,14 @@ struct LockAnimationConfig {
     var autoHide: Bool
     var visibleDuration: TimeInterval
     var fadeDuration: TimeInterval
+    var unlockEnabled: Bool
+    var unlockDuration: TimeInterval
+    var reappearDelay: TimeInterval
+
+    /// Unlock animation hold + collapse/fade-out.
+    var unlockOverlayTotalDuration: TimeInterval {
+        unlockDuration * 2 + 0.02
+    }
 
     static func forBuiltInDisplay(_ isBuiltIn: Bool) -> LockAnimationConfig {
         if isBuiltIn {
@@ -36,14 +44,20 @@ struct LockAnimationConfig {
                 enabled: Defaults[.lockAnimationBuiltIn],
                 autoHide: Defaults[.lockAnimationAutoHideBuiltIn],
                 visibleDuration: max(Defaults[.lockAnimationVisibleBuiltIn], 0),
-                fadeDuration: max(Defaults[.lockAnimationFadeBuiltIn], 0.05)
+                fadeDuration: max(Defaults[.lockAnimationFadeBuiltIn], 0.05),
+                unlockEnabled: Defaults[.unlockAnimationBuiltIn],
+                unlockDuration: max(Defaults[.unlockDurationBuiltIn], 0.1),
+                reappearDelay: max(Defaults[.postUnlockReappearDelayBuiltIn], 0)
             )
         }
         return LockAnimationConfig(
             enabled: Defaults[.lockAnimationExternal],
             autoHide: Defaults[.lockAnimationAutoHideExternal],
             visibleDuration: max(Defaults[.lockAnimationVisibleExternal], 0),
-            fadeDuration: max(Defaults[.lockAnimationFadeExternal], 0.05)
+            fadeDuration: max(Defaults[.lockAnimationFadeExternal], 0.05),
+            unlockEnabled: Defaults[.unlockAnimationExternal],
+            unlockDuration: max(Defaults[.unlockDurationExternal], 0.1),
+            reappearDelay: max(Defaults[.postUnlockReappearDelayExternal], 0)
         )
     }
 
@@ -63,11 +77,6 @@ enum LockScreenAnimationTimings {
     /// Fade-in used when the notch comes back after unlocking.
     static let postUnlockNotchFadeIn: TimeInterval = 0.35
 
-    /// Total time the lock-screen notch is on screen after an unlock
-    /// (unlock animation + collapse/fade-out).
-    static var unlockOverlayTotalDuration: TimeInterval {
-        unlockCollapse + unlockCollapse + 0.02
-    }
 }
 
 @MainActor

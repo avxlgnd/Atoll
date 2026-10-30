@@ -84,6 +84,9 @@ struct ContentView: View {
     @Default(.externalDisplayStyle) var externalDisplayStyle
     @Default(.hideNonNotchUntilHover) var hideNonNotchUntilHover
     @Default(.hideExternalNotchUntilMedia) var hideExternalNotchUntilMedia
+    @Default(.hideUntilMediaSkipsIsland) var hideUntilMediaSkipsIsland
+    @Default(.notchBackgroundStyle) var notchBackgroundStyle
+    @Default(.islandVerticalOffset) var islandVerticalOffset
     @Default(.terminalStickyMode) var terminalStickyMode
     
     // Battery settings reactivity
@@ -97,7 +100,7 @@ struct ContentView: View {
     
     // Dynamic sizing based on view type and graph count with smooth transitions
     var dynamicNotchSize: CGSize {
-        let baseSize = Defaults[.enableMinimalisticUI] ? minimalisticOpenNotchSize(isDynamicIslandMode: isDynamicIslandMode) : openNotchSize
+        let baseSize = Defaults[.enableMinimalisticUI] ? minimalisticOpenNotchSize(isDynamicIslandMode: isDynamicIslandMode) : openNotchSizeForScreen(currentScreenName)
         
         // When inline sneak peek is active in closed notch, use the wider inline width
         // so the outer maxWidth frame doesn't clip the expanded content
@@ -405,7 +408,10 @@ struct ContentView: View {
     private var shouldHideUntilHover: Bool {
         guard vm.notchState == .closed, !isSneakPeekVisibleOnCurrentScreen else { return false }
         let hiddenUntilHover = hideNonNotchUntilHover && isNonNotchScreen
-        let hiddenUntilMedia = hideExternalNotchUntilMedia && isExternalDisplayScreen && !isMediaActiveForNotch
+        let hiddenUntilMedia = hideExternalNotchUntilMedia
+            && isExternalDisplayScreen
+            && !isMediaActiveForNotch
+            && !(hideUntilMediaSkipsIsland && isDynamicIslandMode)
         return hiddenUntilHover || hiddenUntilMedia
     }
 
@@ -539,6 +545,25 @@ struct ContentView: View {
         installRootLifecycleHandlers(on: rootBodyView)
     }
 
+    /// Surface behind the notch / Dynamic Island: solid black or liquid glass.
+    @ViewBuilder
+    private var notchSurfaceBackground: some View {
+        switch notchBackgroundStyle {
+        case .black:
+            Color.black
+        case .liquidGlass:
+            if #available(macOS 26.0, *) {
+                Color.clear
+                    .glassEffect(.regular.tint(Color.black.opacity(0.45)), in: resolvedClipShape)
+            } else {
+                ZStack {
+                    Rectangle().fill(.ultraThinMaterial)
+                    Color.black.opacity(0.45)
+                }
+            }
+        }
+    }
+
     private var mainLayoutBase: some View {
         NotchLayout()
             .frame(alignment: .top)
@@ -550,7 +575,7 @@ struct ContentView: View {
                     AppDelegate.shared?.updateNotchClickThrough()
                 }
             )
-            .background(.black)
+            .background(notchSurfaceBackground)
             .clipShape(resolvedClipShape)
             .compositingGroup()
             .shadow(
@@ -755,7 +780,7 @@ struct ContentView: View {
         }
         .frame(
             maxWidth: (dynamicNotchSize.width + (vm.notchState == .open ? 24 : 0) + (isDynamicIslandMode ? dynamicIslandShadowInset * 2 : 0)).rounded(),
-            maxHeight: (dynamicNotchSize.height + (vm.notchState == .open ? 12 : 0) + (isDynamicIslandMode ? dynamicIslandTopOffset + dynamicIslandShadowInset * 2 : currentShadowPadding)).rounded(),
+            maxHeight: (dynamicNotchSize.height + (vm.notchState == .open ? 12 : 0) + (isDynamicIslandMode ? dynamicIslandTopOffset + dynamicIslandShadowInset + currentShadowPadding : currentShadowPadding)).rounded(),
             alignment: .top
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)

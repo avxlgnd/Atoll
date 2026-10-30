@@ -1048,6 +1048,7 @@ struct GeneralSettings: View {
     @Default(.gestureSensitivity) var gestureSensitivity
     @Default(.minimumHoverDuration) var minimumHoverDuration
     @Default(.helloAnimationTrigger) var helloAnimationTrigger
+    @Default(.hideExternalNotchUntilMedia) var hideExternalNotchUntilMedia
     @Default(.nonNotchHeight) var nonNotchHeight
     @Default(.nonNotchHeightMode) var nonNotchHeightMode
     @Default(.notchHeight) var notchHeight
@@ -1360,6 +1361,17 @@ struct GeneralSettings: View {
             Text("When enabled, the notch slides up out of view on external displays until music or other media is playing, then slides back down. It hides again shortly after playback stops. Move the pointer to the top edge of the screen to bring it back at any time.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            if hideExternalNotchUntilMedia {
+                Defaults.Toggle(key: .hideUntilMediaSkipsIsland) {
+                    Text("Don't hide when using the Dynamic Island style")
+                }
+                .padding(.leading, 16)
+                .settingsHighlight(id: highlightID("Don't hide when using the Dynamic Island style"))
+                Text("With the Dynamic Island style on an external display, the island stays visible. The notch style still hides until media plays.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 16)
+            }
         } header: {
             Text("Notch behavior")
         }
@@ -4244,6 +4256,10 @@ struct Appearance: View {
     @Default(.selectedAppIconID) private var selectedAppIconID
     @Default(.openNotchWidth) var openNotchWidth
     @Default(.closedNotchWidth) var closedNotchWidth
+    @Default(.openIslandWidth) var openIslandWidth
+    @Default(.closedIslandWidth) var closedIslandWidth
+    @Default(.islandVerticalOffset) var islandVerticalOffset
+    @Default(.notchBackgroundStyle) var notchBackgroundStyle
     @Default(.customizePhysicalNotchWidth) var customizePhysicalNotchWidth
     @Default(.enableMinimalisticUI) var enableMinimalisticUI
     @Default(.lockScreenGlassCustomizationMode) private var lockScreenGlassCustomizationMode
@@ -4362,7 +4378,11 @@ struct Appearance: View {
                 }
             }
 
+            notchStyleControls()
+
             notchWidthControls()
+
+            islandSizeControls()
 
             Section {
                 if #available(macOS 26.0, *) {
@@ -4882,6 +4902,113 @@ struct Appearance: View {
     }
 
     @ViewBuilder
+    private func notchStyleControls() -> some View {
+        Section {
+            Picker("Background", selection: $notchBackgroundStyle) {
+                ForEach(NotchBackgroundStyle.allCases) { style in
+                    Text(style.title).tag(style)
+                }
+            }
+            .settingsHighlight(id: highlightID("Notch and island background"))
+        } header: {
+            Text("Notch & Island Look")
+        } footer: {
+            Text("Applies to the notch and the Dynamic Island on every display. Liquid Glass needs macOS 26; older versions use a frosted blur.")
+        }
+    }
+
+    @ViewBuilder
+    private func islandSizeControls() -> some View {
+        Section {
+            let recommendedMin = currentRecommendedMinimumNotchWidth()
+            let openRange = Double(recommendedMin)...900
+            let closedRange = Double(80)...400
+
+            let openBinding = Binding<Double>(
+                get: { Double(openIslandWidth) },
+                set: { newValue in
+                    let clamped = min(max(newValue, openRange.lowerBound), openRange.upperBound)
+                    let value = CGFloat(clamped)
+                    if openIslandWidth != value { openIslandWidth = value }
+                }
+            )
+            let closedBinding = Binding<Double>(
+                get: { Double(closedIslandWidth) },
+                set: { newValue in
+                    let clamped = min(max(newValue, closedRange.lowerBound), closedRange.upperBound)
+                    let value = CGFloat(clamped)
+                    if closedIslandWidth != value {
+                        closedIslandWidth = value
+                        NotificationCenter.default.post(name: Notification.Name.notchHeightChanged, object: nil)
+                    }
+                }
+            )
+            let offsetBinding = Binding<Double>(
+                get: { islandVerticalOffset },
+                set: { newValue in
+                    if islandVerticalOffset != newValue {
+                        islandVerticalOffset = newValue
+                        NotificationCenter.default.post(name: Notification.Name.notchHeightChanged, object: nil)
+                    }
+                }
+            )
+
+            VStack(alignment: .leading, spacing: 10) {
+                Slider(value: closedBinding, in: closedRange, step: 5) {
+                    HStack {
+                        Text("Closed island width")
+                        Spacer()
+                        Text("\(Int(closedIslandWidth)) px")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .settingsHighlight(id: highlightID("Closed island width"))
+
+                Slider(value: openBinding, in: openRange, step: 10) {
+                    HStack {
+                        Text("Expanded island width")
+                        Spacer()
+                        Text("\(Int(openIslandWidth)) px")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .disabled(enableMinimalisticUI)
+                .settingsHighlight(id: highlightID("Expanded island width"))
+
+                Divider().padding(.vertical, 4)
+
+                Slider(value: offsetBinding, in: -12...24, step: 1) {
+                    HStack {
+                        Text("Vertical position")
+                        Spacer()
+                        Text("\(Int(islandVerticalOffset)) pt")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .settingsHighlight(id: highlightID("Island vertical position"))
+
+                HStack {
+                    Text("0 sits flush with the top of the screen. Raise it to float the island lower, lower it to tuck it up.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Reset") {
+                        openIslandWidth = recommendedMin
+                        closedIslandWidth = 150
+                        islandVerticalOffset = 0
+                        NotificationCenter.default.post(name: Notification.Name.notchHeightChanged, object: nil)
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+        } header: {
+            Text("Dynamic Island Size & Position")
+        } footer: {
+            Text("These apply to external displays using the Dynamic Island style. The notch has its own sizes above.")
+        }
+    }
+
+    @ViewBuilder
     private func notchWidthControls() -> some View {
         Section {
             let recommendedMin = currentRecommendedMinimumNotchWidth()
@@ -4929,13 +5056,13 @@ struct Appearance: View {
                     step: 5
                 ) {
                     HStack {
-                        Text("Closed notch / pill width")
+                        Text("Closed notch width")
                         Spacer()
                         Text("\(Int(closedNotchWidth)) px")
                             .foregroundStyle(.secondary)
                     }
                 }
-                .settingsHighlight(id: highlightID("Closed notch / pill width"))
+                .settingsHighlight(id: highlightID("Closed notch width"))
 
                 Divider().padding(.vertical, 4)
 
@@ -5004,7 +5131,12 @@ struct LockScreenSettings: View {
     @Default(.lockAnimationAutoHideExternal) private var lockAnimationAutoHideExternal
     @Default(.lockAnimationVisibleExternal) private var lockAnimationVisibleExternal
     @Default(.lockAnimationFadeExternal) private var lockAnimationFadeExternal
-    @Default(.postUnlockReappearDelay) private var postUnlockReappearDelay
+    @Default(.unlockAnimationBuiltIn) private var unlockAnimationBuiltIn
+    @Default(.unlockDurationBuiltIn) private var unlockDurationBuiltIn
+    @Default(.postUnlockReappearDelayBuiltIn) private var postUnlockReappearDelayBuiltIn
+    @Default(.unlockAnimationExternal) private var unlockAnimationExternal
+    @Default(.unlockDurationExternal) private var unlockDurationExternal
+    @Default(.postUnlockReappearDelayExternal) private var postUnlockReappearDelayExternal
     @ObservedObject private var calendarManager = CalendarManager.shared
     @ObservedObject private var previewManager = LockScreenWidgetPreviewManager.shared
     @Default(.lockScreenGlassStyle) private var lockScreenGlassStyle
@@ -5132,7 +5264,10 @@ struct LockScreenSettings: View {
         enabled: Binding<Bool>,
         autoHide: Binding<Bool>,
         visible: Binding<Double>,
-        fade: Binding<Double>
+        fade: Binding<Double>,
+        unlockEnabled: Binding<Bool>,
+        unlockDuration: Binding<Double>,
+        reappearDelay: Binding<Double>
     ) -> some View {
         Section {
             Toggle("Play lock animation", isOn: enabled)
@@ -5157,12 +5292,30 @@ struct LockScreenSettings: View {
                     }
                 }
             }
+
+            Toggle("Play unlock animation", isOn: unlockEnabled)
+            if unlockEnabled.wrappedValue {
+                Slider(value: unlockDuration, in: 0.2...3, step: 0.1) {
+                    HStack {
+                        Text("Unlock animation duration")
+                        Spacer()
+                        Text("\(unlockDuration.wrappedValue, specifier: "%.1f")s")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            Slider(value: reappearDelay, in: 0...5, step: 0.1) {
+                HStack {
+                    Text("Notch reappears after unlocking")
+                    Spacer()
+                    Text("\(reappearDelay.wrappedValue, specifier: "%.1f")s")
+                        .foregroundStyle(.secondary)
+                }
+            }
         } header: {
             Text(title)
         } footer: {
-            Text(enabled.wrappedValue
-                 ? "Turn off \"Fade out automatically\" to keep the animation up until you unlock."
-                 : "The notch disappears immediately when you lock, with no lock or unlock animation on this display.")
+            Text("Lock animation off: the notch disappears immediately when you lock. Unlock animation off: the notch stays hidden after unlocking until the reappear delay is over.")
         }
     }
 
@@ -5183,35 +5336,26 @@ struct LockScreenSettings: View {
                 Text("Controls whether Dynamic Island mirrors lock/unlock events with its own live activity and audible chimes. With the live activity on, the notch shows the lock animation while locked, disappears when you unlock, and comes back after the delay below.")
             }
 
-            Section {
-                Slider(value: $postUnlockReappearDelay, in: 0...5, step: 0.1) {
-                    HStack {
-                        Text("Notch reappears after unlocking")
-                        Spacer()
-                        Text("\(postUnlockReappearDelay, specifier: "%.1f")s")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            } header: {
-                Text("Unlock Timing")
-            } footer: {
-                Text("How long the notch stays gone, after the unlock animation finishes, before it fades back in.")
-            }
-
             lockAnimationSection(
-                title: "Lock Animation: MacBook Display",
+                title: "MacBook Display (Notch)",
                 enabled: $lockAnimationBuiltIn,
                 autoHide: $lockAnimationAutoHideBuiltIn,
                 visible: $lockAnimationVisibleBuiltIn,
-                fade: $lockAnimationFadeBuiltIn
+                fade: $lockAnimationFadeBuiltIn,
+                unlockEnabled: $unlockAnimationBuiltIn,
+                unlockDuration: $unlockDurationBuiltIn,
+                reappearDelay: $postUnlockReappearDelayBuiltIn
             )
 
             lockAnimationSection(
-                title: "Lock Animation: External Displays",
+                title: "External Displays (Dynamic Island / Notch)",
                 enabled: $lockAnimationExternal,
                 autoHide: $lockAnimationAutoHideExternal,
                 visible: $lockAnimationVisibleExternal,
-                fade: $lockAnimationFadeExternal
+                fade: $lockAnimationFadeExternal,
+                unlockEnabled: $unlockAnimationExternal,
+                unlockDuration: $unlockDurationExternal,
+                reappearDelay: $postUnlockReappearDelayExternal
             )
 
             Section {

@@ -255,8 +255,9 @@ class LockScreenLiveActivityWindowManager {
         hideTask?.cancel()
         guard let context = lockContext() else { return }
 
-        // The hello animation can replace the default unlock animation.
-        guard LockAnimationConfig.forBuiltInDisplay(context.screen.isBuiltInDisplay).enabled,
+        // The unlock animation can be turned off per display, or replaced by the hello animation.
+        let config = LockAnimationConfig.forBuiltInDisplay(context.screen.isBuiltInDisplay)
+        guard config.unlockEnabled,
               Defaults[.helloAnimationTrigger] != .unlock
         else {
             hideWithAnimation(duration: 0.1)
@@ -271,10 +272,10 @@ class LockScreenLiveActivityWindowManager {
         overlayAnimator.update(isLocked: false)
 
         hideTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(LockScreenAnimationTimings.unlockCollapse))
+            try? await Task.sleep(for: .seconds(config.unlockDuration))
             guard let self, !Task.isCancelled else { return }
             await MainActor.run {
-                self.hideWithAnimation()
+                self.hideWithAnimation(duration: config.unlockDuration)
             }
         }
     }

@@ -404,6 +404,20 @@ enum HelloAnimationTrigger: String, CaseIterable, Identifiable, Defaults.Seriali
     }
 }
 
+enum NotchBackgroundStyle: String, CaseIterable, Identifiable, Defaults.Serializable {
+    case black
+    case liquidGlass
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .black: return "Black"
+        case .liquidGlass: return "Liquid Glass"
+        }
+    }
+}
+
 enum HideNotchOption: String, Defaults.Serializable {
     case always
     case nowPlayingOnly
@@ -880,8 +894,25 @@ extension Defaults.Keys {
     static let lockAnimationAutoHideExternal = Key<Bool>("lockAnimationAutoHideExternal", default: true)
     static let lockAnimationVisibleExternal = Key<Double>("lockAnimationVisibleExternal", default: 0.5)
     static let lockAnimationFadeExternal = Key<Double>("lockAnimationFadeExternal", default: 0.3)
-    /// How long the notch stays gone after unlocking before it fades back in.
-    static let postUnlockReappearDelay = Key<Double>("postUnlockReappearDelay", default: 1.5)
+    // Unlock animation, per display type: on/off, animation duration, and how long the
+    // notch stays gone after unlocking before it fades back in.
+    static let unlockAnimationBuiltIn = Key<Bool>("unlockAnimationBuiltIn", default: true)
+    static let unlockDurationBuiltIn = Key<Double>("unlockDurationBuiltIn", default: 0.82)
+    static let postUnlockReappearDelayBuiltIn = Key<Double>("postUnlockReappearDelayBuiltIn", default: 1.5)
+    static let unlockAnimationExternal = Key<Bool>("unlockAnimationExternal", default: true)
+    static let unlockDurationExternal = Key<Double>("unlockDurationExternal", default: 0.82)
+    static let postUnlockReappearDelayExternal = Key<Double>("postUnlockReappearDelayExternal", default: 1.5)
+
+    // Dynamic Island style: its own closed/open widths and vertical position.
+    static let openIslandWidth = Key<CGFloat>("openIslandWidth", default: 640)
+    static let closedIslandWidth = Key<CGFloat>("closedIslandWidth", default: 150)
+    /// Gap between the top of the screen and the Dynamic Island pill (negative moves it up).
+    static let islandVerticalOffset = Key<Double>("islandVerticalOffset", default: 0)
+
+    /// Black or liquid glass look for the notch and the Dynamic Island.
+    static let notchBackgroundStyle = Key<NotchBackgroundStyle>("notchBackgroundStyle", default: .black)
+    /// With "hide until media plays" on, leave the Dynamic Island style visible.
+    static let hideUntilMediaSkipsIsland = Key<Bool>("hideUntilMediaSkipsIsland", default: false)
     static let notchHeightMode = Key<WindowHeightMode>(
         "notchHeightMode",
         default: WindowHeightMode.matchRealNotchSize
