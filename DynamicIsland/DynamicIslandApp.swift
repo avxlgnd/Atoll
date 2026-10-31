@@ -587,8 +587,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             ? minimalisticOpenNotchSize(isDynamicIslandMode: shouldUseDynamicIslandMode(for: screenName))
             : openNotchSizeForScreen(screenName)
         let padded = addShadowPadding(to: base, isMinimalistic: minimalistic)
-        // 600 is wider than the widest inline sneak peek / HUD content.
-        return CGSize(width: max(padded.width, 600), height: padded.height)
+        // 600 is wider than the widest inline sneak peek / HUD content. The extra height is room
+        // for content that turns out a little taller than its estimate (it is invisible).
+        return CGSize(width: max(padded.width, 600), height: padded.height + 40)
     }
 
     private func rawRequiredNotchSize() -> CGSize {

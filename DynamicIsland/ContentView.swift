@@ -790,15 +790,20 @@ struct ContentView: View {
     }
 
     private var rootBodyView: some View {
-        ZStack(alignment: .top) {
-            configuredMainLayout
+        GeometryReader { proxy in
+            ZStack(alignment: .top) {
+                configuredMainLayout
+            }
+            .frame(
+                maxWidth: (dynamicNotchSize.width + (vm.notchState == .open ? 24 : 0) + (isDynamicIslandMode ? dynamicIslandShadowInset * 2 : 0)).rounded(),
+                maxHeight: (dynamicNotchSize.height + (vm.notchState == .open ? 12 : 0) + (isDynamicIslandMode ? dynamicIslandTopOffset + dynamicIslandShadowInset + currentShadowPadding : currentShadowPadding)).rounded(),
+                alignment: .top
+            )
+            // Always pin the content to the top of the window. A flexible frame would let content that is
+            // taller than the window push the layout out of the window on both sides, which cut
+            // off the top of the island (the overflow is split between the top and the bottom).
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
         }
-        .frame(
-            maxWidth: (dynamicNotchSize.width + (vm.notchState == .open ? 24 : 0) + (isDynamicIslandMode ? dynamicIslandShadowInset * 2 : 0)).rounded(),
-            maxHeight: (dynamicNotchSize.height + (vm.notchState == .open ? 12 : 0) + (isDynamicIslandMode ? dynamicIslandTopOffset + dynamicIslandShadowInset + currentShadowPadding : currentShadowPadding)).rounded(),
-            alignment: .top
-        )
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .environmentObject(privacyManager)
         .background(dragDetector)
         .environmentObject(vm)
