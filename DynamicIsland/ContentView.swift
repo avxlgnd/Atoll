@@ -100,7 +100,7 @@ struct ContentView: View {
     
     // Dynamic sizing based on view type and graph count with smooth transitions
     var dynamicNotchSize: CGSize {
-        let baseSize = Defaults[.enableMinimalisticUI] ? minimalisticOpenNotchSize(isDynamicIslandMode: isDynamicIslandMode) : openNotchSizeForScreen(currentScreenName)
+        let baseSize = enableMinimalisticUI ? minimalisticOpenNotchSize(isDynamicIslandMode: isDynamicIslandMode) : openNotchSizeForScreen(currentScreenName)
         
         // When inline sneak peek is active in closed notch, use the wider inline width
         // so the outer maxWidth frame doesn't clip the expanded content
@@ -122,7 +122,7 @@ struct ContentView: View {
                 ? InlineHUD.airPodsListeningModeWidth(
                     closedNotchWidth: vm.closedNotchSize.width,
                     gestureProgress: gestureProgress,
-                    minimalistic: Defaults[.enableMinimalisticUI]
+                    minimalistic: enableMinimalisticUI
                 ) + notchHorizontalPadding * 2
                 : 460
             return CGSize(width: max(baseSize.width, inlineWidth), height: baseSize.height)
@@ -143,6 +143,15 @@ struct ContentView: View {
                     }
                 }()
                 
+                if isDynamicIslandMode {
+                    return dynamicIslandBatteryHUDSize(
+                        kind: kind,
+                        style: style,
+                        closedWidth: vm.closedNotchSize.width,
+                        baseHeight: vm.effectiveClosedNotchHeight
+                    )
+                }
+
                 var width = vm.closedNotchSize.width
                 var height = vm.effectiveClosedNotchHeight
                 
@@ -235,7 +244,13 @@ struct ContentView: View {
     @Default(.musicControlWindowEnabled) var musicControlWindowEnabled
     @Default(.showNotHumanFace) var showNotHumanFace
     @Default(.useModernCloseAnimation) var useModernCloseAnimation
-    @Default(.enableMinimalisticUI) var enableMinimalisticUI
+    @Default(.enableMinimalisticUI) var notchMinimalisticUI
+    @Default(.enableMinimalisticUIIsland) var islandMinimalisticUI
+    @Default(.islandBackgroundStyle) var islandBackgroundStyle
+    /// Minimalistic UI setting of the style (notch or Dynamic Island) this screen uses.
+    var enableMinimalisticUI: Bool {
+        isDynamicIslandMode ? islandMinimalisticUI : notchMinimalisticUI
+    }
 
     private static let musicControlLogFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -548,7 +563,7 @@ struct ContentView: View {
     /// Surface behind the notch / Dynamic Island: solid black or liquid glass.
     @ViewBuilder
     private var notchSurfaceBackground: some View {
-        switch notchBackgroundStyle {
+        switch (isDynamicIslandMode ? islandBackgroundStyle : notchBackgroundStyle) {
         case .black:
             Color.black
         case .liquidGlass:
@@ -925,7 +940,7 @@ struct ContentView: View {
       func NotchLayout() -> some View {
           VStack(alignment: .leading) {
               VStack(alignment: .leading) {
-                  if coordinator.isHelloActive {
+                  if coordinator.isHelloActive && vm.notchState == .open {
                       Spacer()
                       HelloAnimation().frame(width: 200, height: 80).onAppear(perform: {
                           vm.closeHello()
@@ -1039,7 +1054,7 @@ struct ContentView: View {
                           DynamicIslandFaceAnimation().animation(.interactiveSpring, value: musicManager.isPlayerIdle)
                       } else if vm.notchState == .open {
                           DynamicIslandHeader()
-                              .frame(height: (Defaults[.enableMinimalisticUI] && isDynamicIslandMode) ? nil : max(24, vm.effectiveClosedNotchHeight))
+                              .frame(height: (enableMinimalisticUI && isDynamicIslandMode) ? nil : max(24, vm.effectiveClosedNotchHeight))
                        } else {
                            Rectangle().fill(.clear).frame(width: vm.closedNotchSize.width - 20, height: vm.effectiveClosedNotchHeight)
                        }
@@ -1910,7 +1925,7 @@ struct ContentView: View {
     var dragDetector: some View {
         if lockScreenManager.isLocked {
             EmptyView()
-        } else if Defaults[.dynamicShelf] && !Defaults[.enableMinimalisticUI] {
+        } else if Defaults[.dynamicShelf] && !enableMinimalisticUI {
             Color.clear
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .contentShape(Rectangle())

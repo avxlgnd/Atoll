@@ -37,7 +37,12 @@ var openNotchSize: CGSize {
     let minWidth = currentRecommendedMinimumNotchWidth()
     let maxWidth = maxAllowedNotchWidth()
     let width = min(max(storedWidth, minWidth), maxWidth)
-    return .init(width: width, height: 200)
+    var height: CGFloat = 200
+    if Defaults[.externalDisplayStyle] == .dynamicIsland {
+        // Window must be tall enough for the tallest style in use.
+        height += max(CGFloat(Defaults[.islandHeightAdjustment]), 0)
+    }
+    return .init(width: width, height: height)
 }
 
 /// Open size for a specific screen, using the Dynamic Island width when that screen
@@ -49,7 +54,11 @@ func openNotchSizeForScreen(_ screenName: String?) -> CGSize {
     let minWidth = currentRecommendedMinimumNotchWidth()
     let maxWidth = maxAllowedNotchWidth(for: screenName)
     let width = min(max(storedWidth, minWidth), maxWidth)
-    return .init(width: width, height: 200)
+    var height: CGFloat = 200
+    if shouldUseDynamicIslandMode(for: screenName) {
+        height = max(height + CGFloat(Defaults[.islandHeightAdjustment]), 120)
+    }
+    return .init(width: width, height: height)
 }
 
 /// Maximum notch width based on the current screen's point width.
@@ -128,22 +137,34 @@ func currentRecommendedMinimumNotchWidth() -> CGFloat {
 /// Also clamps to screen width so the notch never exceeds the display.
 /// Only adjusts when not in minimalistic mode.
 func enforceMinimumNotchWidth() {
-    guard !Defaults[.enableMinimalisticUI] else { return }
     let minWidth = currentRecommendedMinimumNotchWidth()
     let maxWidth = maxAllowedNotchWidth()
-    var width = Defaults[.openNotchWidth]
-    if width < minWidth { width = minWidth }
-    if width > maxWidth { width = maxWidth }
-    if Defaults[.openNotchWidth] != width {
-        Defaults[.openNotchWidth] = width
+
+    if !Defaults[.enableMinimalisticUI] {
+        var width = Defaults[.openNotchWidth]
+        if width < minWidth { width = minWidth }
+        if width > maxWidth { width = maxWidth }
+        if Defaults[.openNotchWidth] != width {
+            Defaults[.openNotchWidth] = width
+        }
     }
 
-    var islandWidth = Defaults[.openIslandWidth]
-    if islandWidth < minWidth { islandWidth = minWidth }
-    if islandWidth > maxWidth { islandWidth = maxWidth }
-    if Defaults[.openIslandWidth] != islandWidth {
-        Defaults[.openIslandWidth] = islandWidth
+    if !Defaults[.enableMinimalisticUIIsland] {
+        var islandWidth = Defaults[.openIslandWidth]
+        if islandWidth < minWidth { islandWidth = minWidth }
+        if islandWidth > maxWidth { islandWidth = maxWidth }
+        if Defaults[.openIslandWidth] != islandWidth {
+            Defaults[.openIslandWidth] = islandWidth
+        }
     }
+}
+
+/// Minimalistic UI setting for the style used on `screenName`
+/// (the Dynamic Island style has its own setting; the notch uses `enableMinimalisticUI`).
+func isMinimalisticUIEnabled(for screenName: String?) -> Bool {
+    shouldUseDynamicIslandMode(for: screenName)
+        ? Defaults[.enableMinimalisticUIIsland]
+        : Defaults[.enableMinimalisticUI]
 }
 private let minimalisticBaseOpenNotchSize: CGSize = .init(width: 420, height: 180)
 private let minimalisticLyricsExtraHeight: CGFloat = 40
@@ -162,6 +183,7 @@ func minimalisticOpenNotchSize(isDynamicIslandMode: Bool) -> CGSize {
     if isDynamicIslandMode {
         size.width = 340 // Reduced from 420 for a narrower pill
         size.height = 144 // Exact height of the minimalistic music player view
+        size.height += CGFloat(Defaults[.islandHeightAdjustment])
     }
 
     if Defaults[.enableLyrics] {
@@ -379,6 +401,11 @@ func getClosedNotchSize(screen: String? = nil) -> CGSize {
                 notchHeight = screen.frame.maxY - screen.visibleFrame.maxY
             }
         }
+    }
+
+    // Dynamic Island style: user-adjustable height (closed and open).
+    if shouldUseDynamicIslandMode(for: selectedScreen?.localizedName) {
+        notchHeight = max(notchHeight + CGFloat(Defaults[.islandHeightAdjustment]), 16)
     }
 
     return .init(width: notchWidth, height: notchHeight)

@@ -389,6 +389,25 @@ struct DynamicIslandBatteryView: View {
 }
 
 
+/// Size of the temporary battery HUD (charging / low battery / full battery) on the
+/// Dynamic Island style. The HUD view, the SwiftUI container and the window all use this one
+/// function, so they can never disagree about how much room the HUD has.
+func dynamicIslandBatteryHUDSize(
+    kind: BatteryTemporaryHUDKind,
+    style: BatteryNotificationStyle,
+    closedWidth: CGFloat,
+    baseHeight: CGFloat
+) -> CGSize {
+    switch (kind, style) {
+    case (.charging, _), (.lowBattery, .compact), (.fullBattery, .compact):
+        return CGSize(width: max(closedWidth + 180, 270), height: max(baseHeight, 34))
+    case (.lowBattery, .standard):
+        return CGSize(width: 340, height: 96)
+    case (.fullBattery, .standard):
+        return CGSize(width: 320, height: 90)
+    }
+}
+
 private struct BatteryTemporaryHUDMetrics {
     let width: CGFloat
     let height: CGFloat
@@ -509,7 +528,21 @@ struct BatteryTemporaryActivityView: View {
     }
 
     private var metrics: BatteryTemporaryHUDMetrics {
-        kind.metrics(
+        if isDynamicIslandMode {
+            let size = dynamicIslandBatteryHUDSize(
+                kind: kind,
+                style: style,
+                closedWidth: closedNotchWidth,
+                baseHeight: baseHeight
+            )
+            return BatteryTemporaryHUDMetrics(
+                width: size.width,
+                height: size.height,
+                topRadius: 12,
+                bottomRadius: 28
+            )
+        }
+        return kind.metrics(
             style: style,
             closedNotchWidth: closedNotchWidth,
             baseHeight: baseHeight
@@ -559,6 +592,20 @@ struct BatteryTemporaryActivityView: View {
                 tint: batteryTint
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        } else if isDynamicIslandMode {
+            // No physical notch to work around: center everything in the pill.
+            HStack(spacing: 14) {
+                VStack(alignment: .leading, spacing: 3) {
+                    standardTitle
+                    standardDescription
+                }
+
+                Spacer(minLength: 8)
+
+                standardIndicator
+            }
+            .padding(.horizontal, 26)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         } else {
             VStack {
                 Spacer()
@@ -598,10 +645,13 @@ struct BatteryTemporaryActivityView: View {
                 .font(.system(size: kind == .lowBattery ? 13 : 13, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.82))
                 .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
 
             Text("\(batteryLevel)%")
                 .font(.system(size: kind == .lowBattery ? 12 : 13, weight: .semibold))
                 .foregroundStyle(batteryTint)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
         }
     }
 
@@ -626,6 +676,7 @@ struct BatteryTemporaryActivityView: View {
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.gray.opacity(0.6))
                     .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         case .fullBattery:
             Text(verbatim: "Your Mac is fully charged.")
@@ -633,6 +684,7 @@ struct BatteryTemporaryActivityView: View {
                 .foregroundStyle(.gray.opacity(0.6))
                 .fontWeight(.medium)
                 .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
         }
     }
 

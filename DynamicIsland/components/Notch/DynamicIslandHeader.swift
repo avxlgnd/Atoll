@@ -39,7 +39,11 @@ struct DynamicIslandHeader: View {
     @Default(.showBatteryIndicator) var showBatteryIndicator
     @Default(.showBatteryPercentInside) var showBatteryPercentInside
     @Default(.showMinimalisticBatteryIndicator) var showMinimalisticBatteryIndicator
-    @Default(.enableMinimalisticUI) var enableMinimalisticUI
+    @Default(.enableMinimalisticUI) private var notchMinimalisticUI
+    @Default(.enableMinimalisticUIIsland) private var islandMinimalisticUI
+    private var enableMinimalisticUI: Bool {
+        shouldUseDynamicIslandMode(for: vm.screen) ? islandMinimalisticUI : notchMinimalisticUI
+    }
     
     var body: some View {
         HStack(spacing: 0) {

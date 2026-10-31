@@ -59,7 +59,13 @@ struct TabSelectionView: View {
     @Default(.showCalendar) private var showCalendar
     @Default(.showMirror) private var showMirror
     @Default(.showStandardMediaControls) private var showStandardMediaControls
-    @Default(.enableMinimalisticUI) private var enableMinimalisticUI
+    @Default(.enableMinimalisticUI) private var notchMinimalisticUI
+    @Default(.enableMinimalisticUIIsland) private var islandMinimalisticUI
+    private var enableMinimalisticUI: Bool {
+        shouldUseDynamicIslandMode(for: DynamicIslandViewCoordinator.shared.selectedScreen)
+            ? islandMinimalisticUI
+            : notchMinimalisticUI
+    }
     @Namespace var animation
     
     private var tabs: [TabModel] {

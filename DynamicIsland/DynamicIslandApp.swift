@@ -506,12 +506,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.animationBehavior = .none
         // collectionBehavior is configured in DynamicIslandWindow.init
 
-        window.contentView = FirstMouseHostingView(
+        let hostingView = FirstMouseHostingView(
             rootView: ContentView()
                 .environmentObject(viewModel)
                 .environmentObject(webcamManager)
                 //.moveToSky()
         )
+        // The window size is managed by AppDelegate only; don't let SwiftUI content
+        // push minimum/maximum sizes onto the window.
+        hostingView.sizingOptions = []
+        window.contentView = hostingView
         
         window.orderFrontRegardless()
         // Pin above every space (fullscreen included) only for "Never hide"; the
@@ -544,6 +548,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             width: roundedWidth,
             height: roundedHeight
         ), display: false)
+        recenterWindow(window, on: screen)
         
         if changeAlpha {
             window.alphaValue = 1
@@ -605,6 +610,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                 }()
                 
+                if shouldUseDynamicIslandMode(for: vm.screen) {
+                    let islandSize = dynamicIslandBatteryHUDSize(
+                        kind: kind,
+                        style: style,
+                        closedWidth: closedNotchWidth,
+                        baseHeight: closedNotchHeight
+                    )
+                    return addShadowPadding(to: islandSize, isMinimalistic: isMinimalisticUIEnabled(for: vm.screen))
+                }
+
                 var width = closedNotchWidth
                 var height = closedNotchHeight
                 
@@ -619,12 +634,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     height += 70
                 }
                 
-                return addShadowPadding(to: CGSize(width: width, height: height), isMinimalistic: Defaults[.enableMinimalisticUI])
+                return addShadowPadding(to: CGSize(width: width, height: height), isMinimalistic: isMinimalisticUIEnabled(for: vm.screen))
             }
         }
         
         // Use minimalistic or normal size based on settings
-        var baseSize = Defaults[.enableMinimalisticUI] ? minimalisticOpenNotchSize(isDynamicIslandMode: shouldUseDynamicIslandMode(for: vm.screen)) : openNotchSize
+        var baseSize = isMinimalisticUIEnabled(for: vm.screen) ? minimalisticOpenNotchSize(isDynamicIslandMode: shouldUseDynamicIslandMode(for: vm.screen)) : openNotchSize
         
         // Use a consistent height for different view types
         if coordinator.currentView == .timer {
@@ -645,7 +660,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         )
         var result = addShadowPadding(
             to: adjustedContentSize,
-            isMinimalistic: Defaults[.enableMinimalisticUI]
+            isMinimalistic: isMinimalisticUIEnabled(for: vm.screen)
         )
 
         return result
@@ -680,7 +695,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         } else if let window {
-            let screen = window.screen ?? NSScreen.screens.first { $0.frame.intersects(window.frame) } ?? NSScreen.main ?? NSScreen.screens.first
+            let screen = NSScreen.screens.first(where: { $0.localizedName == vm.screen })
+                ?? window.screen
+                ?? NSScreen.screens.first { $0.frame.intersects(window.frame) }
+                ?? NSScreen.main
+                ?? NSScreen.screens.first
             guard let screen else { return }
             let screenSize = adjustedSizeForScreen(size, screen: screen)
             if force || window.frame.size != screenSize {
@@ -700,10 +719,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let targetFrame = NSRect(x: newX, y: newY, width: clampedWidth, height: clampedHeight)
 
         window.setFrame(targetFrame, display: true)
+        recenterWindow(window, on: screen)
+    }
+
+    /// AppKit can silently change a window's size (for example to satisfy a minimum size),
+    /// which grows it to one side and makes the island look like it jumped sideways.
+    /// Re-center on the screen using the size the window actually ended up with.
+    private func recenterWindow(_ window: NSWindow, on screen: NSScreen) {
+        let screenFrame = screen.frame
+        let actual = window.frame
+        let expectedX = (screenFrame.midX - actual.width / 2).rounded()
+        let expectedY = (screenFrame.maxY - actual.height).rounded()
+        if abs(actual.minX - expectedX) > 0.5 || abs(actual.minY - expectedY) > 0.5 {
+            window.setFrameOrigin(NSPoint(x: expectedX, y: expectedY))
+        }
     }
 
     private func shouldAnimateResize(for newSize: CGSize) -> Bool {
-        if Defaults[.enableMinimalisticUI] && !ReminderLiveActivityManager.shared.activeWindowReminders.isEmpty {
+        if isMinimalisticUIEnabled(for: vm.screen) && !ReminderLiveActivityManager.shared.activeWindowReminders.isEmpty {
             return false
         }
         return true
@@ -863,6 +896,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }.store(in: &cancellables)
 
+        Defaults.publisher(.islandHeightAdjustment, options: []).sink { [weak self] _ in
+            DispatchQueue.main.async { [weak self] in
+                self?.adjustWindowPosition()
+                self?.debouncedUpdateWindowSize()
+            }
+        }.store(in: &cancellables)
+
         // Observe terminal settings changes
         Defaults.publisher(.enableTerminalFeature, options: []).sink { [weak self] _ in
             self?.debouncedUpdateWindowSize()
@@ -939,6 +979,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Observe minimalistic UI setting changes - trigger window resize
         Defaults.publisher(.enableMinimalisticUI, options: []).sink { [weak self] _ in
             // Update window size IMMEDIATELY (no debouncing) to prevent position shift
+            self?.updateWindowSizeIfNeeded()
+        }.store(in: &cancellables)
+
+        Defaults.publisher(.enableMinimalisticUIIsland, options: []).sink { [weak self] _ in
             self?.updateWindowSizeIfNeeded()
         }.store(in: &cancellables)
         
@@ -1083,7 +1127,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async {
                 self.showOnboardingWindow()
             }
-            playWelcomeSound()
         }
         
         previousScreens = NSScreen.screens
@@ -1675,13 +1718,14 @@ final class MediaControlsStateCoordinator {
     private init() {
         let masterPublisher = Defaults.publisher(.showStandardMediaControls)
         let minimalisticPublisher = Defaults.publisher(.enableMinimalisticUI)
+        let islandMinimalisticPublisher = Defaults.publisher(.enableMinimalisticUIIsland)
 
-        Publishers.CombineLatest(masterPublisher, minimalisticPublisher)
+        Publishers.CombineLatest3(masterPublisher, minimalisticPublisher, islandMinimalisticPublisher)
             .receive(on: RunLoop.main)
-            .sink { [weak self] masterChange, minimalisticChange in
+            .sink { [weak self] masterChange, minimalisticChange, islandChange in
                 self?.handleStateChange(
                     showStandard: masterChange.newValue,
-                    minimalistic: minimalisticChange.newValue
+                    minimalistic: minimalisticChange.newValue || islandChange.newValue
                 )
             }
             .store(in: &cancellables)

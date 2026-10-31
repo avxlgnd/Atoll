@@ -48,7 +48,11 @@ struct TimerLiveActivity: View {
     @Default(.timerSolidColor) private var solidColor
     @Default(.timerPresets) private var timerPresets
     @Default(.timerControlWindowEnabled) private var controlWindowEnabled
-    @Default(.enableMinimalisticUI) private var enableMinimalisticUI
+    @Default(.enableMinimalisticUI) private var notchMinimalisticUI
+    @Default(.enableMinimalisticUIIsland) private var islandMinimalisticUI
+    private var enableMinimalisticUI: Bool {
+        shouldUseDynamicIslandMode(for: vm.screen) ? islandMinimalisticUI : notchMinimalisticUI
+    }
     
     private var notchContentHeight: CGFloat {
         max(0, vm.effectiveClosedNotchHeight - (isHovering ? 0 : 12))

@@ -112,22 +112,20 @@ struct GlowingSnake<
 }
 
 struct HelloAnimation: View {
-    @State private var progress: Double = 0.0
-    
+    /// Progress is derived from one shared start time instead of a view-local animation, so a
+    /// rebuilt view carries on where it was instead of starting over.
     var body: some View {
-        GlowingSnake(
-            progress: progress,
-            fill: .hello,
-            lineWidth: 8,
-            blurRadius: 8.0,
-            shape: { HelloShape() }
-        )
-        .onAppear {
-            withAnimation(
-                .easeInOut(duration: 4.0)
-            ) {
-                progress = 1.0
-            }
+        TimelineView(.animation) { context in
+            let start = DynamicIslandViewCoordinator.shared.helloStartDate ?? context.date
+            let raw = min(max(context.date.timeIntervalSince(start) / DynamicIslandViewModel.helloAnimationDuration, 0), 1)
+            let eased = raw < 0.5 ? 2 * raw * raw : 1 - pow(-2 * raw + 2, 2) / 2
+            GlowingSnake(
+                progress: eased,
+                fill: .hello,
+                lineWidth: 8,
+                blurRadius: 8.0,
+                shape: { HelloShape() }
+            )
         }
     }
 }

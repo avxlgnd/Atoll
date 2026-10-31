@@ -110,7 +110,11 @@ struct InlineHUD: View {
     @Default(.showBluetoothBatteryPercentageText) var showBluetoothBatteryPercentageText
     @Default(.showBluetoothDeviceNameMarquee) var showBluetoothDeviceNameMarquee
     @Default(.useBluetoothHUD3DIcon) var useBluetoothHUD3DIcon
-    @Default(.enableMinimalisticUI) var enableMinimalisticUI
+    @Default(.enableMinimalisticUI) private var notchMinimalisticUI
+    @Default(.enableMinimalisticUIIsland) private var islandMinimalisticUI
+    private var enableMinimalisticUI: Bool {
+        shouldUseDynamicIslandMode(for: vm.screen) ? islandMinimalisticUI : notchMinimalisticUI
+    }
     @Default(.showCapsLockLabel) var showCapsLockLabel
     @Default(.capsLockIndicatorTintMode) var capsLockTintMode
     @ObservedObject var bluetoothManager = BluetoothAudioManager.shared

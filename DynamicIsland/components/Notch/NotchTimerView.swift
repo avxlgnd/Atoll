@@ -27,7 +27,11 @@ struct NotchTimerView: View {
     @ObservedObject var timerManager = TimerManager.shared
     @ObservedObject var coordinator = DynamicIslandViewCoordinator.shared
     @Default(.enableTimerFeature) var enableTimerFeature
-    @Default(.enableMinimalisticUI) private var enableMinimalisticUI
+    @Default(.enableMinimalisticUI) private var notchMinimalisticUI
+    @Default(.enableMinimalisticUIIsland) private var islandMinimalisticUI
+    private var enableMinimalisticUI: Bool {
+        shouldUseDynamicIslandMode(for: vm.screen) ? islandMinimalisticUI : notchMinimalisticUI
+    }
     @Default(.timerPresets) private var timerPresets
     @Default(.timerIconColorMode) private var colorMode
     @Default(.timerSolidColor) private var solidColor

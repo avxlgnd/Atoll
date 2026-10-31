@@ -1060,6 +1060,7 @@ struct GeneralSettings: View {
     @Default(.enableGestures) var enableGestures
     @Default(.openNotchOnHover) var openNotchOnHover
     @Default(.enableMinimalisticUI) var enableMinimalisticUI
+    @Default(.enableMinimalisticUIIsland) var enableMinimalisticUIIsland
     @Default(.showMinimalisticBatteryIndicator) var showMinimalisticBatteryIndicator
     @Default(.enableHorizontalMusicGestures) var enableHorizontalMusicGestures
     @Default(.musicGestureBehavior) var musicGestureBehavior
@@ -1085,6 +1086,16 @@ struct GeneralSettings: View {
                     }
                 }
                 .settingsHighlight(id: highlightID("Enable Minimalistic UI"))
+
+                Defaults.Toggle(key: .enableMinimalisticUIIsland) {
+                    Text("Enable Minimalistic UI for the Dynamic Island style")
+                }
+                .onChange(of: enableMinimalisticUIIsland) { _, newValue in
+                    if newValue {
+                        Defaults[.useModernCloseAnimation] = true
+                    }
+                }
+                .settingsHighlight(id: highlightID("Enable Minimalistic UI for the Dynamic Island style"))
 
                 Defaults.Toggle(key: .showMinimalisticBatteryIndicator) {
                     Text("Show battery indicator")
@@ -1344,6 +1355,10 @@ struct GeneralSettings: View {
                 }
             }
             .settingsHighlight(id: highlightID("Play hello animation"))
+            Defaults.Toggle(key: .playHelloSound) {
+                Text("Play the hello sound with the animation")
+            }
+            .settingsHighlight(id: highlightID("Play the hello sound with the animation"))
             Text("The hello animation opens the notch with a greeting for a few seconds. \"When the Mac is unlocked\" plays it after the notch comes back instead of the lock icon's unlock animation.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -3666,7 +3681,7 @@ struct About: View {
             }
             VStack(spacing: 0) {
                 Divider()
-                Text("Made with ❤️ by Ebullioscopic")
+                Text("Made with 💜 by Yusuf Syed")
                     .foregroundStyle(.secondary)
                     .padding(.top, 5)
                     .padding(.bottom, 7)
@@ -4259,7 +4274,10 @@ struct Appearance: View {
     @Default(.openIslandWidth) var openIslandWidth
     @Default(.closedIslandWidth) var closedIslandWidth
     @Default(.islandVerticalOffset) var islandVerticalOffset
+    @Default(.islandHeightAdjustment) var islandHeightAdjustment
     @Default(.notchBackgroundStyle) var notchBackgroundStyle
+    @Default(.islandBackgroundStyle) var islandBackgroundStyle
+    @Default(.enableMinimalisticUIIsland) var enableMinimalisticUIIsland
     @Default(.customizePhysicalNotchWidth) var customizePhysicalNotchWidth
     @Default(.enableMinimalisticUI) var enableMinimalisticUI
     @Default(.lockScreenGlassCustomizationMode) private var lockScreenGlassCustomizationMode
@@ -4904,16 +4922,22 @@ struct Appearance: View {
     @ViewBuilder
     private func notchStyleControls() -> some View {
         Section {
-            Picker("Background", selection: $notchBackgroundStyle) {
+            Picker("Notch background", selection: $notchBackgroundStyle) {
                 ForEach(NotchBackgroundStyle.allCases) { style in
                     Text(style.title).tag(style)
                 }
             }
-            .settingsHighlight(id: highlightID("Notch and island background"))
+            .settingsHighlight(id: highlightID("Notch background"))
+            Picker("Dynamic Island background", selection: $islandBackgroundStyle) {
+                ForEach(NotchBackgroundStyle.allCases) { style in
+                    Text(style.title).tag(style)
+                }
+            }
+            .settingsHighlight(id: highlightID("Dynamic Island background"))
         } header: {
             Text("Notch & Island Look")
         } footer: {
-            Text("Applies to the notch and the Dynamic Island on every display. Liquid Glass needs macOS 26; older versions use a frosted blur.")
+            Text("Choose Black or Liquid Glass separately for the notch and the Dynamic Island. Liquid Glass needs macOS 26; older versions use a frosted blur.")
         }
     }
 
@@ -4952,6 +4976,15 @@ struct Appearance: View {
                     }
                 }
             )
+            let heightBinding = Binding<Double>(
+                get: { islandHeightAdjustment },
+                set: { newValue in
+                    if islandHeightAdjustment != newValue {
+                        islandHeightAdjustment = newValue
+                        NotificationCenter.default.post(name: Notification.Name.notchHeightChanged, object: nil)
+                    }
+                }
+            )
 
             VStack(alignment: .leading, spacing: 10) {
                 Slider(value: closedBinding, in: closedRange, step: 5) {
@@ -4972,20 +5005,30 @@ struct Appearance: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-                .disabled(enableMinimalisticUI)
+                .disabled(enableMinimalisticUIIsland)
                 .settingsHighlight(id: highlightID("Expanded island width"))
 
                 Divider().padding(.vertical, 4)
 
-                Slider(value: offsetBinding, in: -12...24, step: 1) {
+                Slider(value: offsetBinding, in: -6...12, step: 0.5) {
                     HStack {
                         Text("Vertical position")
                         Spacer()
-                        Text("\(Int(islandVerticalOffset)) pt")
+                        Text("\(islandVerticalOffset, specifier: "%.1f") pt")
                             .foregroundStyle(.secondary)
                     }
                 }
                 .settingsHighlight(id: highlightID("Island vertical position"))
+
+                Slider(value: heightBinding, in: -12...30, step: 1) {
+                    HStack {
+                        Text("Island height (closed and open)")
+                        Spacer()
+                        Text("\(Int(islandHeightAdjustment)) pt")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .settingsHighlight(id: highlightID("Island height"))
 
                 HStack {
                     Text("0 sits flush with the top of the screen. Raise it to float the island lower, lower it to tuck it up.")
@@ -4996,6 +5039,7 @@ struct Appearance: View {
                         openIslandWidth = recommendedMin
                         closedIslandWidth = 150
                         islandVerticalOffset = 0
+                        islandHeightAdjustment = 0
                         NotificationCenter.default.post(name: Notification.Name.notchHeightChanged, object: nil)
                     }
                     .buttonStyle(.bordered)

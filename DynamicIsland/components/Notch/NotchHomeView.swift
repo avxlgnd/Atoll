@@ -709,7 +709,7 @@ struct NotchHomeView: View {
 
     private var mainContent: some View {
         HStack(alignment: .top, spacing: 20) {
-            if Defaults[.enableMinimalisticUI] {
+            if isMinimalisticUIEnabled(for: vm.screen) {
                 if let overridePayload = minimalisticOverridePayload {
                     ExtensionMinimalisticExperienceView(
                         payload: overridePayload,
@@ -754,7 +754,7 @@ struct NotchHomeView: View {
             .combined(with: .blurReplace.animation(.smooth.speed(0.9)))
             .combined(with: .move(edge: .top)))
         .blur(radius: vm.notchState == .closed ? 30 : 0)
-        .padding(Defaults[.enableMinimalisticUI] ? 0 : 8) //Putting the main padding for home view here for consistency
+        .padding(isMinimalisticUIEnabled(for: vm.screen) ? 0 : 8) //Putting the main padding for home view here for consistency
     }
 
     private var minimalisticOverridePayload: ExtensionNotchExperiencePayload? {

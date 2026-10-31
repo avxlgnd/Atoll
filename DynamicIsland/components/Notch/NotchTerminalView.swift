@@ -87,7 +87,11 @@ struct NotchTerminalView: View {
     @EnvironmentObject var vm: DynamicIslandViewModel
     @Default(.enableTerminalFeature) var enableTerminalFeature
     @Default(.cornerRadiusScaling) var cornerRadiusScaling
-    @Default(.enableMinimalisticUI) var enableMinimalisticUI
+    @Default(.enableMinimalisticUI) private var notchMinimalisticUI
+    @Default(.enableMinimalisticUIIsland) private var islandMinimalisticUI
+    private var enableMinimalisticUI: Bool {
+        shouldUseDynamicIslandMode(for: vm.screen) ? islandMinimalisticUI : notchMinimalisticUI
+    }
     @State private var suppressionToken = UUID()
     @State private var isSuppressing = false
 

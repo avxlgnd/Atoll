@@ -1150,7 +1150,7 @@ class MusicManager: ObservableObject {
 
     private func updateSneakPeek() {
         let standardControlsEnabled = Defaults[.showStandardMediaControls]
-        let minimalisticEnabled = Defaults[.enableMinimalisticUI]
+        let minimalisticEnabled = isMinimalisticUIEnabled(for: DynamicIslandViewCoordinator.shared.selectedScreen)
 
         guard standardControlsEnabled || minimalisticEnabled else { return }
 

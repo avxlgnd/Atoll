@@ -908,9 +908,16 @@ extension Defaults.Keys {
     static let closedIslandWidth = Key<CGFloat>("closedIslandWidth", default: 150)
     /// Gap between the top of the screen and the Dynamic Island pill (negative moves it up).
     static let islandVerticalOffset = Key<Double>("islandVerticalOffset", default: 0)
+    /// Extra (or less) height for the Dynamic Island pill, applied both closed and open.
+    static let islandHeightAdjustment = Key<Double>("islandHeightAdjustment", default: 0)
 
     /// Black or liquid glass look for the notch and the Dynamic Island.
     static let notchBackgroundStyle = Key<NotchBackgroundStyle>("notchBackgroundStyle", default: .black)
+    static let islandBackgroundStyle = Key<NotchBackgroundStyle>("islandBackgroundStyle", default: .black)
+    /// Minimalistic UI for the Dynamic Island style. (`enableMinimalisticUI` is the notch's setting.)
+    static let enableMinimalisticUIIsland = Key<Bool>("enableMinimalisticUIIsland", default: false)
+    /// Play the welcome sound together with the hello animation.
+    static let playHelloSound = Key<Bool>("playHelloSound", default: true)
     /// With "hide until media plays" on, leave the Dynamic Island style visible.
     static let hideUntilMediaSkipsIsland = Key<Bool>("hideUntilMediaSkipsIsland", default: false)
     static let notchHeightMode = Key<WindowHeightMode>(

@@ -112,7 +112,7 @@ class DynamicIslandViewCoordinator: ObservableObject {
     
     @Published var currentView: NotchViews = .home {
         didSet {
-            if Defaults[.enableMinimalisticUI] && currentView != .home {
+            if isMinimalisticUIEnabled(for: selectedScreen) && currentView != .home {
                 currentView = .home
                 return
             }
@@ -132,6 +132,8 @@ class DynamicIslandViewCoordinator: ObservableObject {
     @AppStorage("firstLaunch") var firstLaunch: Bool = true
     /// True while the hello animation is being played outside of the very first launch.
     @Published var helloAnimationActive: Bool = false
+    /// When the current hello animation started (shared by all screens). Not published on purpose.
+    var helloStartDate: Date?
     var isHelloActive: Bool { firstLaunch || helloAnimationActive }
     @AppStorage("showWhatsNew") var showWhatsNew: Bool = true
     @AppStorage("musicLiveActivityEnabled") var musicLiveActivityEnabled: Bool = true
@@ -190,9 +192,12 @@ class DynamicIslandViewCoordinator: ObservableObject {
             .store(in: &cancellables)
 
         Defaults.publisher(.enableMinimalisticUI)
+            .map { _ in () }
+            .merge(with: Defaults.publisher(.enableMinimalisticUIIsland).map { _ in () })
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] change in
-                self?.handleMinimalisticModeChange(change.newValue)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.handleMinimalisticModeChange(isMinimalisticUIEnabled(for: self.selectedScreen))
             }
             .store(in: &cancellables)
 
@@ -239,7 +244,8 @@ class DynamicIslandViewCoordinator: ObservableObject {
             Defaults.publisher(.enableClipboardManager).map { _ in () }.eraseToAnyPublisher(),
             Defaults.publisher(.clipboardDisplayMode).map { _ in () }.eraseToAnyPublisher(),
             Defaults.publisher(.enableTerminalFeature).map { _ in () }.eraseToAnyPublisher(),
-            Defaults.publisher(.enableMinimalisticUI).map { _ in () }.eraseToAnyPublisher()
+            Defaults.publisher(.enableMinimalisticUI).map { _ in () }.eraseToAnyPublisher(),
+            Defaults.publisher(.enableMinimalisticUIIsland).map { _ in () }.eraseToAnyPublisher()
         )
         .debounce(for: .milliseconds(100), scheduler: DispatchQueue.main)
         .sink { _ in
