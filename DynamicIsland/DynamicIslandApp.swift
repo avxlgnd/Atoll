@@ -567,7 +567,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         resizeWindows(to: requiredSize, animated: false, force: true)
     }
     
+    /// Window size to use. It is never smaller than what the notch/island can draw: sneak peeks,
+    /// HUDs and the open/close animations all draw outside the "required" size for a moment, and the
+    /// window no longer grows by itself (the hosting view must not resize it). The extra, empty part
+    /// is invisible and lets clicks through (see `updateNotchClickThrough`).
     private func calculateRequiredNotchSize() -> CGSize {
+        let required = rawRequiredNotchSize()
+        let floor = minimumWindowSize()
+        return CGSize(
+            width: max(required.width, floor.width),
+            height: max(required.height, floor.height)
+        )
+    }
+
+    private func minimumWindowSize() -> CGSize {
+        let screenName = vm.screen
+        let minimalistic = isMinimalisticUIEnabled(for: screenName)
+        let base = minimalistic
+            ? minimalisticOpenNotchSize(isDynamicIslandMode: shouldUseDynamicIslandMode(for: screenName))
+            : openNotchSizeForScreen(screenName)
+        let padded = addShadowPadding(to: base, isMinimalistic: minimalistic)
+        // 600 is wider than the widest inline sneak peek / HUD content.
+        return CGSize(width: max(padded.width, 600), height: padded.height)
+    }
+
+    private func rawRequiredNotchSize() -> CGSize {
         // Check if inline sneak peek is showing and notch is closed
         let airPodsListeningModeSneakActive = vm.notchState == .closed &&
                                       coordinator.sneakPeek.show &&
@@ -684,8 +708,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         resizeWindows(to: size, animated: animated, force: force)
     }
 
-    private func resizeWindows(to size: CGSize, animated: Bool, force: Bool) {
-        guard size.width > 0, size.height > 0 else { return }
+    private func resizeWindows(to requestedSize: CGSize, animated: Bool, force: Bool) {
+        guard requestedSize.width > 0, requestedSize.height > 0 else { return }
+
+        // Every resize path gets the same minimum, so the window can't end up smaller than
+        // what the notch/island is about to draw.
+        let minimum = minimumWindowSize()
+        let size = CGSize(
+            width: max(requestedSize.width, minimum.width),
+            height: max(requestedSize.height, minimum.height)
+        )
 
         if Defaults[.showOnAllDisplays] {
             for (screen, window) in windows {
