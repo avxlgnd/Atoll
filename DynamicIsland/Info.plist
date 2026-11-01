@@ -11,6 +11,10 @@
 	<string>Atoll uses Apple Music to fetch animated artwork for the lock screen wallpaper.</string>
 	<key>NSAudioCaptureUsageDescription</key>
 	<string>Atoll needs audio capture permission to display the real-time music waveform visualizer.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Atoll sends your replies through the Messages app when you answer a message from the notch.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>Atoll shows the names and photos of your contacts on message notifications.</string>
 	<key>NSScreenCaptureUsageDescription</key>
 	<string>Atoll needs screen recording permission to capture screenshots for the AI assistant feature.</string>
 	<key>SUEnableDownloaderService</key>

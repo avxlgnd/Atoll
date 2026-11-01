@@ -1048,6 +1048,9 @@ struct GeneralSettings: View {
     @Default(.gestureSensitivity) var gestureSensitivity
     @Default(.minimumHoverDuration) var minimumHoverDuration
     @Default(.helloAnimationTrigger) var helloAnimationTrigger
+    @Default(.messageNotificationsEnabled) var messageNotificationsEnabled
+    @ObservedObject private var messageManager = MessageNotificationManager.shared
+    @State private var diagnosticsMessage: String?
     @Default(.hideExternalNotchUntilMedia) var hideExternalNotchUntilMedia
     @Default(.nonNotchHeight) var nonNotchHeight
     @Default(.nonNotchHeightMode) var nonNotchHeightMode
@@ -1071,6 +1074,71 @@ struct GeneralSettings: View {
 
     private func highlightID(_ title: String) -> String {
         SettingsTab.general.highlightID(for: title)
+    }
+
+    @ViewBuilder
+    private func messageNotificationSections() -> some View {
+        Section {
+            Defaults.Toggle(key: .messageNotificationsEnabled) {
+                Text("Show Messages notifications in the notch")
+            }
+            .settingsHighlight(id: highlightID("Show Messages notifications in the notch"))
+
+            if messageNotificationsEnabled {
+                HStack {
+                    Text("Status")
+                    Spacer()
+                    Text(messageManager.status.description)
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack(spacing: 12) {
+                    Button("Open Full Disk Access settings") {
+                        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                    Button("Show a test message") {
+                        MessageBannerModel.shared.add([
+                            IncomingMessage(
+                                id: Int64.random(in: 1_000_000_000...2_000_000_000),
+                                chatGUID: "atoll-test-chat",
+                                chatName: nil,
+                                isGroup: false,
+                                senderID: "+15555550123",
+                                senderName: "Jamie Chen",
+                                senderPhoto: nil,
+                                text: "Launch plan is in the shared folder. Ship it! Let me know when you've had a look, I'm around all afternoon.",
+                                date: Date(),
+                                service: "iMessage",
+                                thumbnail: nil
+                            )
+                        ])
+                    }
+                }
+            }
+        } header: {
+            Text("Messages")
+        } footer: {
+            Text("Incoming texts drop out of the notch with the sender, photos and a reply field. Atoll reads the Messages database on this Mac, so it needs Full Disk Access (System Settings → Privacy & Security). Contacts and Automation permissions are asked for the first time they are used. Nothing leaves your Mac. Muted chats are not detected yet.")
+        }
+
+        Section {
+            Button("Capture notification layout (15 second countdown)") {
+                NotificationDiagnostics.shared.start { _, message in
+                    diagnosticsMessage = message
+                }
+            }
+            if let diagnosticsMessage {
+                Text(diagnosticsMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("WhatsApp & Call Support (diagnostics)")
+        } footer: {
+            Text("Click the button, then within 15 seconds receive a WhatsApp message or an iPhone/FaceTime call so its banner is on screen. Atoll records how the banner looks to macOS (nothing is sent anywhere), saves a text file in ~/Library/Logs/Atoll and copies it to the clipboard. It beeps when it starts and when it has finished. Needs the Accessibility permission.")
+        }
     }
 
     var body: some View {
@@ -1113,6 +1181,8 @@ struct GeneralSettings: View {
             } footer: {
                 Text("Minimalistic mode focuses on media controls and system HUDs, hiding all extra features for a clean, focused experience. Automatically enables simpler animations.")
             }
+
+            messageNotificationSections()
 
             Section {
                 Defaults.Toggle(key: .menubarIcon) {
@@ -3609,6 +3679,7 @@ struct CalendarSettings: View {
 }
 
 struct About: View {
+    @Default(.updateChecksEnabled) private var updateChecksEnabled
     @State private var showBuildNumber: Bool = false
     let updaterController: SPUStandardUpdaterController
     @Environment(\.openWindow) var openWindow
@@ -3641,7 +3712,25 @@ struct About: View {
                     Text("Version info")
                 }
 
-                UpdaterSettingsView(updater: updaterController.updater)
+                Section {
+                    Toggle("Check for updates", isOn: $updateChecksEnabled)
+                        .onChange(of: updateChecksEnabled) { _, enabled in
+                            if enabled {
+                                updaterController.startUpdater()
+                            } else {
+                                updaterController.updater.automaticallyChecksForUpdates = false
+                                updaterController.updater.automaticallyDownloadsUpdates = false
+                            }
+                        }
+                } header: {
+                    Text("Updates")
+                } footer: {
+                    Text("Off by default. The update feed belongs to the original Atoll developer, so installing one of its updates would replace this modified build.")
+                }
+
+                if updateChecksEnabled {
+                    UpdaterSettingsView(updater: updaterController.updater)
+                }
 
                 HStack(spacing: 30) {
                     Spacer(minLength: 0)

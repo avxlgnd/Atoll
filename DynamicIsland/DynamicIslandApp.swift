@@ -36,7 +36,7 @@ struct DynamicNotchApp: App {
     init() {
         // Skip Sparkle's launch-time update check during UI testing.
         updaterController = SPUStandardUpdaterController(
-            startingUpdater: !AppRuntimeEnvironment.isUITesting,
+            startingUpdater: !AppRuntimeEnvironment.isUITesting && Defaults[.updateChecksEnabled],
             updaterDelegate: nil, userDriverDelegate: nil)
 
         // Initialize the settings window controller with the updater controller
@@ -1003,6 +1003,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }.store(in: &cancellables)
 
         installNotchClickThroughMonitors()
+        MessageNotificationManager.shared.configure()
         Defaults.publisher(.clickThroughNotchArea, options: []).sink { [weak self] _ in
             DispatchQueue.main.async { [weak self] in
                 self?.updateNotchClickThrough()

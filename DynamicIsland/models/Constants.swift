@@ -916,6 +916,10 @@ extension Defaults.Keys {
     static let islandBackgroundStyle = Key<NotchBackgroundStyle>("islandBackgroundStyle", default: .black)
     /// Minimalistic UI for the Dynamic Island style. (`enableMinimalisticUI` is the notch's setting.)
     static let enableMinimalisticUIIsland = Key<Bool>("enableMinimalisticUIIsland", default: false)
+    /// Show incoming Messages (iMessage / SMS) as a banner that drops out of the notch.
+    static let messageNotificationsEnabled = Key<Bool>("messageNotificationsEnabled", default: false)
+    /// Automatic update checks use the original developer's update feed, so they are off by default.
+    static let updateChecksEnabled = Key<Bool>("updateChecksEnabled", default: false)
     /// Play the welcome sound together with the hello animation.
     static let playHelloSound = Key<Bool>("playHelloSound", default: true)
     /// With "hide until media plays" on, leave the Dynamic Island style visible.
