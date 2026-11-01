@@ -10,6 +10,29 @@ import Combine
 import Defaults
 import Foundation
 
+/// Reads whether a Focus (Do Not Disturb, Work, Sleep...) is currently on, from the system's own
+/// Focus database. Needs Full Disk Access, which the Messages feature already needs.
+/// This is an undocumented file, so a macOS update could change it; "can't tell" is reported then.
+enum FocusStatusReader {
+    static var assertionsPath: String {
+        NSHomeDirectory() + "/Library/DoNotDisturb/DB/Assertions.json"
+    }
+
+    /// nil means "can't tell" (file unreadable or in a format we don't recognise).
+    static func isFocusActive() -> Bool? {
+        guard let data = FileManager.default.contents(atPath: assertionsPath),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let entries = json["data"] as? [[String: Any]]
+        else { return nil }
+        for entry in entries {
+            if let records = entry["storeAssertionRecords"] as? [Any], !records.isEmpty {
+                return true
+            }
+        }
+        return false
+    }
+}
+
 enum MessageNotificationStatus: Equatable {
     case disabled
     case starting
@@ -32,6 +55,8 @@ final class MessageNotificationManager: ObservableObject {
     static let shared = MessageNotificationManager()
 
     @Published private(set) var status: MessageNotificationStatus = .disabled
+    @Published private(set) var focusDescription: String = ""
+    private var wasFocusActive = false
 
     private let queue = DispatchQueue(label: "atoll.messages.poll", qos: .utility)
     private var timer: DispatchSourceTimer?
@@ -127,6 +152,11 @@ final class MessageNotificationManager: ObservableObject {
                 lastRowID = newest
             }
 
+            // While a Focus (Do Not Disturb...) is on, new messages are not shown (and not shown later either).
+            let focusActive: Bool? = Defaults[.respectFocusMode] ? FocusStatusReader.isFocusActive() : false
+            publishFocus(focusActive)
+            if focusActive == true { messages.removeAll() }
+
             for index in messages.indices {
                 let resolved = MessageContactResolver.shared.resolve(messages[index].senderID)
                 if let name = resolved.name { messages[index].senderName = name }
@@ -150,6 +180,25 @@ final class MessageNotificationManager: ObservableObject {
             }
         } catch {
             // Transient failures (for example the database being busy) are retried on the next tick.
+        }
+    }
+
+    private func publishFocus(_ active: Bool?) {
+        let text: String
+        if !Defaults[.respectFocusMode] {
+            text = "Not following Focus"
+        } else if let active {
+            text = active ? "A Focus is on: notifications are silenced" : "No Focus is on"
+        } else {
+            text = "Can't tell (Focus status unreadable)"
+        }
+        let nowActive = active == true
+        let justTurnedOn = nowActive && !wasFocusActive
+        wasFocusActive = nowActive
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            if self.focusDescription != text { self.focusDescription = text }
+            if justTurnedOn { MessageBannerModel.shared.dismissAll() }
         }
     }
 

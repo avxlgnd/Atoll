@@ -918,6 +918,8 @@ extension Defaults.Keys {
     static let enableMinimalisticUIIsland = Key<Bool>("enableMinimalisticUIIsland", default: false)
     /// Show incoming Messages (iMessage / SMS) as a banner that drops out of the notch.
     static let messageNotificationsEnabled = Key<Bool>("messageNotificationsEnabled", default: false)
+    /// Stay quiet while a Focus (including Do Not Disturb) is on.
+    static let respectFocusMode = Key<Bool>("respectFocusMode", default: true)
     /// Automatic update checks use the original developer's update feed, so they are off by default.
     static let updateChecksEnabled = Key<Bool>("updateChecksEnabled", default: false)
     /// Play the welcome sound together with the hello animation.

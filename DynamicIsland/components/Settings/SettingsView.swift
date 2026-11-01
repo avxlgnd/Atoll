@@ -1092,6 +1092,17 @@ struct GeneralSettings: View {
                         .foregroundStyle(.secondary)
                 }
 
+                Defaults.Toggle(key: .respectFocusMode) {
+                    Text("Stay quiet during Focus / Do Not Disturb")
+                }
+                .settingsHighlight(id: highlightID("Stay quiet during Focus / Do Not Disturb"))
+                HStack {
+                    Text("Focus")
+                    Spacer()
+                    Text(messageManager.focusDescription.isEmpty ? "Checking…" : messageManager.focusDescription)
+                        .foregroundStyle(.secondary)
+                }
+
                 HStack(spacing: 12) {
                     Button("Open Full Disk Access settings") {
                         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
@@ -1120,7 +1131,7 @@ struct GeneralSettings: View {
         } header: {
             Text("Messages")
         } footer: {
-            Text("Incoming texts drop out of the notch with the sender, photos and a reply field. Atoll reads the Messages database on this Mac, so it needs Full Disk Access (System Settings → Privacy & Security). Contacts and Automation permissions are asked for the first time they are used. Nothing leaves your Mac. Muted chats are not detected yet.")
+            Text("Incoming texts drop out of the notch with the sender, photos and a reply field. Atoll reads the Messages database on this Mac, so it needs Full Disk Access (System Settings → Privacy & Security). Contacts and Automation permissions are asked for the first time they are used. Nothing leaves your Mac. While a Focus is on, messages are silenced completely: the exceptions you set in that Focus (allowed people and apps) are not applied yet. Muted chats are not detected yet.")
         }
 
         Section {

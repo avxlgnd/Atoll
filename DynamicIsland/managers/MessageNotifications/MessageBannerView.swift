@@ -192,7 +192,13 @@ struct MessageBannerView: View {
                 .buttonStyle(.plain)
             }
         }
-        .onAppear { replyFocused = true }
+        .onAppear {
+            // Give the panel a moment to become the key window before asking for focus.
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 150_000_000)
+                replyFocused = true
+            }
+        }
     }
 
     private func timeText(_ date: Date?) -> String {

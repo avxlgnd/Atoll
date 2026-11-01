@@ -83,7 +83,9 @@ final class MessageBannerModel: ObservableObject {
             }
         }
         conversations = Array(conversations.prefix(4))
-        MessageBannerWindowManager.shared.show()
+        Task { @MainActor in
+            MessageBannerWindowManager.shared.show()
+        }
         scheduleDismiss()
     }
 
@@ -104,7 +106,9 @@ final class MessageBannerModel: ObservableObject {
         dismissWork?.cancel()
         replyText = ""
         replyingTo = chatGUID
-        MessageBannerWindowManager.shared.makeKey()
+        Task { @MainActor in
+            MessageBannerWindowManager.shared.makeKey()
+        }
     }
 
     func cancelReply() {
@@ -152,7 +156,9 @@ final class MessageBannerModel: ObservableObject {
             self.replyingTo = nil
             self.replyText = ""
             self.isHovering = false
-            MessageBannerWindowManager.shared.hide()
+            Task { @MainActor in
+                MessageBannerWindowManager.shared.hide()
+            }
         }
     }
 }

@@ -14,6 +14,7 @@ final class MessageBannerPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
+@MainActor
 final class MessageBannerWindowManager {
     static let shared = MessageBannerWindowManager()
 
@@ -31,7 +32,7 @@ final class MessageBannerWindowManager {
         resizeToFit()
         panel?.orderFrontRegardless()
         // The first layout pass happens after the panel is shown; fit again once it has.
-        DispatchQueue.main.async { [weak self] in
+        Task { @MainActor [weak self] in
             self?.resizeToFit()
             model.isVisible = true
         }
@@ -107,8 +108,11 @@ final class MessageBannerWindowManager {
 
         // Keep the panel the size of its content as the banner changes (reply field, more messages...).
         cancellable = MessageBannerModel.shared.objectWillChange.sink { [weak self] _ in
-            DispatchQueue.main.async { self?.resizeToFit() }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) { self?.resizeToFit() }
+            Task { @MainActor [weak self] in
+                self?.resizeToFit()
+                try? await Task.sleep(nanoseconds: 60_000_000)
+                self?.resizeToFit()
+            }
         }
     }
 }
