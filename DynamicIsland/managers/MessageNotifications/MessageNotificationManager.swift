@@ -68,8 +68,11 @@ final class MessageNotificationManager: ObservableObject {
 
     /// Hooks the manager up to its setting. Call once at launch.
     func configure() {
-        Defaults.publisher(.messageNotificationsEnabled)
-            .map { $0.newValue }
+        Publishers.CombineLatest(
+            Defaults.publisher(.notchNotificationsMaster).map { $0.newValue },
+            Defaults.publisher(.messageNotificationsEnabled).map { $0.newValue }
+        )
+            .map { $0 && $1 }
             .removeDuplicates()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] enabled in

@@ -918,6 +918,13 @@ extension Defaults.Keys {
     static let enableMinimalisticUIIsland = Key<Bool>("enableMinimalisticUIIsland", default: false)
     /// Show incoming Messages (iMessage / SMS) as a banner that drops out of the notch.
     static let messageNotificationsEnabled = Key<Bool>("messageNotificationsEnabled", default: false)
+    /// Master switch for messages and calls shown in the notch.
+    static let notchNotificationsMaster = Key<Bool>("notchNotificationsMaster", default: true)
+    static let whatsAppNotificationsEnabled = Key<Bool>("whatsAppNotificationsEnabled", default: false)
+    static let phoneCallsInNotch = Key<Bool>("phoneCallsInNotch", default: false)
+    static let faceTimeCallsInNotch = Key<Bool>("faceTimeCallsInNotch", default: false)
+    /// Show the Messages banner inside the notch / island itself instead of in a separate window.
+    static let messageBannerInNotch = Key<Bool>("messageBannerInNotch", default: true)
     /// Stay quiet while a Focus (including Do Not Disturb) is on.
     static let respectFocusMode = Key<Bool>("respectFocusMode", default: true)
     /// Automatic update checks use the original developer's update feed, so they are off by default.

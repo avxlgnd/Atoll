@@ -333,6 +333,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         applyNotchWindowVisibility(animated: true, duration: duration)
     }
 
+    /// Makes the notch window of the selected screen the key window so a text field in it can take typing.
+    func focusNotchWindowForTyping() {
+        let target: NSWindow?
+        if Defaults[.showOnAllDisplays] {
+            target = windows.first { $0.key.localizedName == coordinator.selectedScreen }?.value ?? windows.values.first
+        } else {
+            target = window
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        target?.makeKeyAndOrderFront(nil)
+    }
+
     // MARK: - Hello animation
 
     /// Plays the hello animation (opens the notch with it, then closes it again).
@@ -614,6 +626,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // Album art (~32) + Middle section (380) + Visualizer (~32) + horizontal padding (28) + clip shape margin (12)
             let inlineSneakPeekWidth: CGFloat = 460
             return CGSize(width: inlineSneakPeekWidth, height: vm.effectiveClosedNotchHeight)
+        }
+
+        // Messages banner growing out of the notch / island
+        if vm.notchState == .closed,
+           Defaults[.messageBannerInNotch],
+           coordinator.expandingView.show,
+           coordinator.expandingView.type == .messages,
+           MessageBannerModel.shared.hasContent {
+            let bannerSize = CGSize(
+                width: MessageBannerModel.cardWidth,
+                height: max(MessageBannerModel.shared.measuredHeight, 60)
+            )
+            return addShadowPadding(to: bannerSize, isMinimalistic: isMinimalisticUIEnabled(for: vm.screen))
         }
 
         // Check for battery HUD expansion
@@ -1004,6 +1029,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         installNotchClickThroughMonitors()
         MessageNotificationManager.shared.configure()
+        WhatsAppNotificationManager.shared.configure()
+        CallBannerMonitor.shared.configure()
         Defaults.publisher(.clickThroughNotchArea, options: []).sink { [weak self] _ in
             DispatchQueue.main.async { [weak self] in
                 self?.updateNotchClickThrough()

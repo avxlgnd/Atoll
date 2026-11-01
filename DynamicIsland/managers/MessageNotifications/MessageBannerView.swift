@@ -9,43 +9,49 @@
 import AppKit
 import SwiftUI
 
-struct MessageBannerView: View {
+/// The banner content without any background. It is drawn inside the notch / island itself
+/// (which provides the black surface and shape), or wrapped by `MessageBannerView` in a panel.
+struct MessageBannerContent: View {
     @ObservedObject var model: MessageBannerModel
+    var topInset: CGFloat
+    var reportsHeight = false
     @FocusState private var replyFocused: Bool
-
-    private var shape: AnyShape {
-        if model.isIsland {
-            return AnyShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
-        }
-        return AnyShape(UnevenRoundedRectangle(
-            topLeadingRadius: 0,
-            bottomLeadingRadius: 32,
-            bottomTrailingRadius: 32,
-            topTrailingRadius: 0,
-            style: .continuous
-        ))
-    }
 
     var body: some View {
         content
-            .padding(.top, model.topInset)
+            .padding(.top, topInset)
             .padding(.horizontal, 22)
             .padding(.bottom, 18)
             .frame(width: MessageBannerModel.cardWidth)
-            .background(Color.black)
-            .clipShape(shape)
-            .shadow(color: .black.opacity(0.4), radius: 14, y: 6)
-            .padding(.horizontal, 14)
-            .padding(.bottom, 26)
-            .offset(y: model.isVisible ? 0 : -300)
-            .animation(.spring(response: 0.5, dampingFraction: 0.82), value: model.isVisible)
-            .animation(.spring(response: 0.4, dampingFraction: 0.85), value: model.replyingTo)
+            .fixedSize(horizontal: false, vertical: true)
+            .background(heightReader)
             .onHover { model.isHovering = $0 }
     }
 
     @ViewBuilder
+    private var heightReader: some View {
+        if reportsHeight {
+            GeometryReader { proxy in
+                Color.clear
+                    .onAppear { report(proxy.size.height) }
+                    .onChange(of: proxy.size.height) { _, height in report(height) }
+            }
+        }
+    }
+
+    private func report(_ height: CGFloat) {
+        Task { @MainActor in
+            if abs(model.measuredHeight - height) > 0.5 {
+                model.measuredHeight = height
+            }
+        }
+    }
+
+    @ViewBuilder
     private var content: some View {
-        if let guid = model.replyingTo, let convo = model.conversation(guid) {
+        if let call = model.activeCall {
+            callView(call)
+        } else if let guid = model.replyingTo, let convo = model.conversation(guid) {
             replyView(convo)
         } else if model.conversations.count == 1, let convo = model.conversations.first {
             row(convo, large: true)
@@ -82,7 +88,7 @@ struct MessageBannerView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
-            .onTapGesture { model.openMessagesApp() }
+            .onTapGesture { model.openApp(for: convo.source) }
 
             VStack(alignment: .trailing, spacing: 8) {
                 HStack(spacing: 6) {
@@ -106,9 +112,13 @@ struct MessageBannerView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                     }
                     Button {
-                        model.beginReply(to: convo.id)
+                        if convo.canReply {
+                            model.beginReply(to: convo.id)
+                        } else {
+                            model.openApp(for: convo.source)
+                        }
                     } label: {
-                        Image(systemName: "arrowshape.turn.up.left.fill")
+                        Image(systemName: convo.canReply ? "arrowshape.turn.up.left.fill" : "arrow.up.right")
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.9))
                             .frame(width: 34, height: 34)
@@ -117,6 +127,75 @@ struct MessageBannerView: View {
                     .buttonStyle(.plain)
                 }
             }
+        }
+    }
+
+    // MARK: - Calls
+
+    private func callView(_ call: IncomingCall) -> some View {
+        HStack(spacing: 14) {
+            ZStack(alignment: .bottomTrailing) {
+                ZStack {
+                    LinearGradient(
+                        colors: [Color(white: 0.66), Color(white: 0.42)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    if call.initials.isEmpty {
+                        Image(systemName: "person.fill")
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundStyle(.white)
+                    } else {
+                        Text(call.initials)
+                            .font(.system(size: 19, weight: .semibold))
+                            .foregroundStyle(.white)
+                    }
+                }
+                .frame(width: 50, height: 50)
+                .clipShape(Circle())
+
+                Image(systemName: call.isFaceTime ? "video.fill" : "phone.fill")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 19, height: 19)
+                    .background(Color.green, in: Circle())
+                    .overlay(Circle().stroke(Color.black, lineWidth: 2))
+                    .offset(x: 4, y: 4)
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(call.kindLabel)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Color.white.opacity(0.6))
+                Text(call.name)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            Button {
+                model.declineCall()
+            } label: {
+                Image(systemName: "phone.down.fill")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 46, height: 46)
+                    .background(Color(red: 0.96, green: 0.27, blue: 0.22), in: Circle())
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                model.answerCall()
+            } label: {
+                Image(systemName: "phone.fill")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 46, height: 46)
+                    .background(Color(red: 0.2, green: 0.78, blue: 0.35), in: Circle())
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -137,7 +216,7 @@ struct MessageBannerView: View {
             }
 
             VStack(alignment: .leading, spacing: 6) {
-                ForEach(convo.messages.suffix(3)) { message in
+                ForEach(convo.messages.suffix(2)) { message in
                     VStack(alignment: .leading, spacing: 6) {
                         if let thumbnail = message.thumbnail {
                             Image(nsImage: thumbnail)
@@ -208,6 +287,36 @@ struct MessageBannerView: View {
     }
 }
 
+/// The banner in its own panel (used when "inside the notch" is turned off).
+struct MessageBannerView: View {
+    @ObservedObject var model: MessageBannerModel
+
+    private var shape: AnyShape {
+        if model.isIsland {
+            return AnyShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
+        }
+        return AnyShape(UnevenRoundedRectangle(
+            topLeadingRadius: 0,
+            bottomLeadingRadius: 32,
+            bottomTrailingRadius: 32,
+            topTrailingRadius: 0,
+            style: .continuous
+        ))
+    }
+
+    var body: some View {
+        MessageBannerContent(model: model, topInset: model.topInset)
+            .background(Color.black)
+            .clipShape(shape)
+            .shadow(color: .black.opacity(0.4), radius: 14, y: 6)
+            .padding(.horizontal, 14)
+            .padding(.bottom, 26)
+            .offset(y: model.isVisible ? 0 : -300)
+            .animation(.spring(response: 0.5, dampingFraction: 0.82), value: model.isVisible)
+            .animation(.spring(response: 0.4, dampingFraction: 0.85), value: model.replyingTo)
+    }
+}
+
 struct MessageAvatar: View {
     let convo: BannerConversation
     var size: CGFloat = 48
@@ -218,11 +327,11 @@ struct MessageAvatar: View {
                 .frame(width: size, height: size)
                 .clipShape(Circle())
 
-            Image(systemName: "message.fill")
+            Image(systemName: convo.source == .whatsApp ? "phone.bubble.fill" : "message.fill")
                 .font(.system(size: 9, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(width: 19, height: 19)
-                .background(Color.green, in: Circle())
+                .background(convo.source == .whatsApp ? Color(red: 0.15, green: 0.8, blue: 0.4) : Color.green, in: Circle())
                 .overlay(Circle().stroke(Color.black, lineWidth: 2))
                 .offset(x: 4, y: 4)
         }

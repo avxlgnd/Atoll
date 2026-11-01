@@ -6,6 +6,8 @@
 //
 
 import AppKit
+import ApplicationServices
+import Defaults
 import Foundation
 import SwiftUI
 
@@ -15,8 +17,12 @@ struct BannerConversation: Identifiable {
     var isGroup: Bool
     var avatarData: Data?
     var messages: [IncomingMessage]
+    var source: MessageSource = .messages
 
     var latest: IncomingMessage? { messages.last }
+
+    /// Replies are sent through the Messages app; other apps can only be opened.
+    var canReply: Bool { source == .messages }
 
     var initials: String {
         let words = title.split(separator: " ").prefix(2)
@@ -39,9 +45,12 @@ final class MessageBannerModel: ObservableObject {
     @Published var conversations: [BannerConversation] = [] {
         didSet { MessageNotificationManager.shared.updateTracked(trackedIDs) }
     }
+    @Published var activeCall: IncomingCall?
     @Published var replyingTo: String?
     @Published var replyText = ""
     @Published var isVisible = false
+    /// Height of the banner content when it is shown inside the notch (measured by the view).
+    @Published var measuredHeight: CGFloat = 130
     @Published var isIsland = false
     @Published var topInset: CGFloat = 16
     @Published var isHovering = false {
@@ -54,6 +63,11 @@ final class MessageBannerModel: ObservableObject {
 
     var trackedIDs: [Int64] {
         conversations.flatMap { $0.messages.map(\.id) }
+    }
+
+    /// True while there is anything to show (a call, or one or more conversations).
+    var hasContent: Bool {
+        activeCall != nil || !conversations.isEmpty
     }
 
     func conversation(_ id: String) -> BannerConversation? {
@@ -78,14 +92,13 @@ final class MessageBannerModel: ObservableObject {
                     title: title,
                     isGroup: message.isGroup,
                     avatarData: message.isGroup ? nil : message.senderPhoto,
-                    messages: [message]
+                    messages: [message],
+                    source: message.source
                 ), at: 0)
             }
         }
         conversations = Array(conversations.prefix(4))
-        Task { @MainActor in
-            MessageBannerWindowManager.shared.show()
-        }
+        presentBanner()
         scheduleDismiss()
     }
 
@@ -97,7 +110,58 @@ final class MessageBannerModel: ObservableObject {
         }
         conversations.removeAll { $0.messages.isEmpty }
         if let replying = replyingTo, conversation(replying) == nil { replyingTo = nil }
+        if conversations.isEmpty && activeCall == nil { dismissAll() }
+    }
+
+    // MARK: - Calls
+
+    /// Called by the call monitor: a ringing call (nil when the call banner is gone).
+    func updateCall(_ call: IncomingCall?) {
+        if let call {
+            let isNew = activeCall?.key != call.key
+            activeCall = call
+            if isNew {
+                dismissWork?.cancel()
+                replyingTo = nil
+                presentBanner()
+            }
+        } else if activeCall != nil {
+            activeCall = nil
+            if conversations.isEmpty { dismissAll() } else { scheduleDismiss(after: 4) }
+        }
+    }
+
+    func answerCall() {
+        guard let call = activeCall else { return }
+        AXUIElementPerformAction(call.accept, kAXPressAction as CFString)
+        finishCall()
+    }
+
+    func declineCall() {
+        guard let call = activeCall else { return }
+        AXUIElementPerformAction(call.decline, kAXPressAction as CFString)
+        finishCall()
+    }
+
+    private func finishCall() {
+        activeCall = nil
         if conversations.isEmpty { dismissAll() }
+    }
+
+    /// Shows the banner inside the notch / island (it grows out of it), or in its own panel.
+    private func presentBanner() {
+        if Defaults[.messageBannerInNotch] {
+            isVisible = true
+            DynamicIslandViewCoordinator.shared.toggleExpandingView(
+                status: true,
+                type: .messages,
+                autoHideDuration: 3600 // dismissal is handled here
+            )
+        } else {
+            Task { @MainActor in
+                MessageBannerWindowManager.shared.show()
+            }
+        }
     }
 
     // MARK: - Reply
@@ -107,7 +171,12 @@ final class MessageBannerModel: ObservableObject {
         replyText = ""
         replyingTo = chatGUID
         Task { @MainActor in
-            MessageBannerWindowManager.shared.makeKey()
+            if Defaults[.messageBannerInNotch] {
+                // The reply field lives in the notch window, which has to become the key window to take typing.
+                AppDelegate.shared?.focusNotchWindowForTyping()
+            } else {
+                MessageBannerWindowManager.shared.makeKey()
+            }
         }
     }
 
@@ -128,8 +197,13 @@ final class MessageBannerModel: ObservableObject {
         if conversations.isEmpty { dismissAll() } else { scheduleDismiss(after: 4) }
     }
 
-    func openMessagesApp() {
-        NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Messages.app"))
+    func openApp(for source: MessageSource) {
+        switch source {
+        case .messages:
+            NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Messages.app"))
+        case .whatsApp:
+            if let url = URL(string: "whatsapp://") { NSWorkspace.shared.open(url) }
+        }
         dismissAll()
     }
 
@@ -138,7 +212,7 @@ final class MessageBannerModel: ObservableObject {
     func scheduleDismiss(after seconds: TimeInterval = 7) {
         dismissWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
-            guard let self, !self.isHovering, self.replyingTo == nil else { return }
+            guard let self, !self.isHovering, self.replyingTo == nil, self.activeCall == nil else { return }
             self.dismissAll()
         }
         dismissWork = work
@@ -150,9 +224,13 @@ final class MessageBannerModel: ObservableObject {
         withAnimation(.easeIn(duration: 0.28)) {
             isVisible = false
         }
+        if Defaults[.messageBannerInNotch] {
+            DynamicIslandViewCoordinator.shared.toggleExpandingView(status: false, type: .messages)
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
             guard let self, !self.isVisible else { return }
             self.conversations = []
+            self.activeCall = nil
             self.replyingTo = nil
             self.replyText = ""
             self.isHovering = false

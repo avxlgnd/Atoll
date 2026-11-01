@@ -84,6 +84,7 @@ struct ContentView: View {
     @Default(.externalDisplayStyle) var externalDisplayStyle
     @Default(.hideNonNotchUntilHover) var hideNonNotchUntilHover
     @Default(.hideExternalNotchUntilMedia) var hideExternalNotchUntilMedia
+    @ObservedObject private var messageBanner = MessageBannerModel.shared
     @Default(.hideUntilMediaSkipsIsland) var hideUntilMediaSkipsIsland
     @Default(.notchBackgroundStyle) var notchBackgroundStyle
     @Default(.islandVerticalOffset) var islandVerticalOffset
@@ -128,6 +129,11 @@ struct ContentView: View {
             return CGSize(width: max(baseSize.width, inlineWidth), height: baseSize.height)
         }
         
+        // Messages banner growing out of the notch / island
+        if isMessageBannerVisible {
+            return CGSize(width: MessageBannerModel.cardWidth, height: max(messageBanner.measuredHeight, 60))
+        }
+
         // Handle battery HUD expansion sizing
         if vm.notchState == .closed && 
            coordinator.expandingView.show && 
@@ -478,6 +484,15 @@ struct ContentView: View {
         return DynamicIslandPillShape(cornerRadius: radius)
     }
 
+    /// A new Messages banner is showing inside the notch / island (it grows out of it).
+    private var isMessageBannerVisible: Bool {
+        guard Defaults[.messageBannerInNotch] else { return false }
+        guard vm.notchState == .closed else { return false }
+        guard coordinator.expandingView.show, coordinator.expandingView.type == .messages else { return false }
+        guard messageBanner.hasContent else { return false }
+        return showOnAllDisplays || currentScreenName == coordinator.selectedScreen
+    }
+
     private var isBatteryHUDVisibleOnCurrentScreen: Bool {
         guard coordinator.expandingView.show, coordinator.expandingView.type == .battery else { return false }
         guard showPowerStatusNotifications else { return false }
@@ -547,6 +562,12 @@ struct ContentView: View {
     /// Resolves the clip/content shape per-screen: pill on non-notch screens
     /// when dynamic island mode is active, standard notch shape otherwise.
     private var resolvedClipShape: AnyShape {
+        if isMessageBannerVisible {
+            if isDynamicIslandMode {
+                return AnyShape(DynamicIslandPillShape(cornerRadius: 32))
+            }
+            return AnyShape(NotchShape(topCornerRadius: activeCornerRadiusInsets.closed.top, bottomCornerRadius: 36))
+        }
         if let activeClosedBatterySurfaceShape {
             return activeClosedBatterySurfaceShape
         }
@@ -990,7 +1011,13 @@ struct ContentView: View {
                           && coordinator.sneakPeek.value < 0
                           && AirPodsListeningMode.fromHUDSymbol(coordinator.sneakPeek.icon) != nil
 
-                      if currentScreenExpansionType == .battery
+                      if isMessageBannerVisible {
+                        MessageBannerContent(
+                            model: messageBanner,
+                            topInset: isDynamicIslandMode ? 18 : vm.effectiveClosedNotchHeight + 8,
+                            reportsHeight: true
+                        )
+                      } else if currentScreenExpansionType == .battery
                             && isBatteryHUDVisibleOnCurrentScreen
                             && vm.notchState == .closed
                             && Defaults[.showPowerStatusNotifications]
@@ -1958,6 +1985,8 @@ struct ContentView: View {
 
     // MARK: - Private Methods
     private func openNotch() {
+        // The message banner has its own buttons; hovering or tapping around them must not open the notch.
+        if isMessageBannerVisible { return }
         withAnimation(.bouncy.speed(1.2)) {
             vm.open()
         }
@@ -2168,6 +2197,7 @@ struct ContentView: View {
 
             guard vm.notchState == .closed,
                 !isSneakPeekVisibleOnCurrentScreen,
+                !isMessageBannerVisible,
                 (Defaults[.openNotchOnHover] || shouldFocusTimerTab) else { return }
 
             hoverTask = Task {

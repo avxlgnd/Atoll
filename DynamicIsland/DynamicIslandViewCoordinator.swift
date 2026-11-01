@@ -36,6 +36,7 @@ enum SneakContentType: Equatable {
     case privacy
     case lockScreen
     case capsLock
+    case messages
     case extensionLiveActivity(bundleID: String, activityID: String)
 }
 
@@ -56,7 +57,8 @@ extension SneakContentType {
              (.bluetoothAudio, .bluetoothAudio),
              (.privacy, .privacy),
              (.lockScreen, .lockScreen),
-             (.capsLock, .capsLock):
+             (.capsLock, .capsLock),
+             (.messages, .messages):
             return true
         case let (.extensionLiveActivity(lb, la), .extensionLiveActivity(rb, ra)):
             return lb == rb && la == ra

@@ -57,6 +57,7 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
     case calendar
     case hudAndOSD
     case battery
+    case notifications
     case stats
     case clipboard
     case screenAssistant
@@ -75,7 +76,7 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
         switch self {
         case .general, .appearance:                                          return .core
         case .media, .liveActivities, .lockScreen, .devices:                 return .mediaAndDisplay
-        case .hudAndOSD, .battery:                                           return .system
+        case .hudAndOSD, .battery, .notifications:                           return .system
         case .timer, .calendar, .notes:                                      return .productivity
         case .clipboard, .screenAssistant, .colorPicker, .shelf,
              .downloads, .shortcuts:                                         return .utilities
@@ -98,6 +99,7 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
         case .calendar: return String(localized: "Calendar")
         case .hudAndOSD: return String(localized: "Controls")
         case .battery: return String(localized: "Battery")
+        case .notifications: return String(localized: "Messages & Calls")
         case .stats: return String(localized: "Stats")
         case .clipboard: return String(localized: "Clipboard")
         case .screenAssistant: return String(localized: "Screen Assistant")
@@ -124,6 +126,7 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
         case .calendar: return "calendar"
         case .hudAndOSD: return "dial.medium.fill"
         case .battery: return "battery.100.bolt"
+        case .notifications: return "bubble.left.and.bubble.right.fill"
         case .stats: return "chart.xyaxis.line"
         case .clipboard: return "clipboard"
         case .screenAssistant: return "brain.head.profile"
@@ -150,6 +153,7 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
         case .calendar: return .cyan
         case .hudAndOSD: return .indigo
         case .battery: return Color(red: 0.202, green: 0.783, blue: 0.348, opacity: 1.000)
+        case .notifications: return .green
         case .stats: return .teal
         case .clipboard: return .mint
         case .screenAssistant: return .pink
@@ -989,6 +993,10 @@ struct SettingsView: View {
             SettingsForm(tab: .battery) {
                 Charge()
             }
+        case .notifications:
+            SettingsForm(tab: .notifications) {
+                MessagesCallsSettings()
+            }
         case .stats:
             SettingsForm(tab: .stats) {
                 StatsSettings()
@@ -1048,9 +1056,6 @@ struct GeneralSettings: View {
     @Default(.gestureSensitivity) var gestureSensitivity
     @Default(.minimumHoverDuration) var minimumHoverDuration
     @Default(.helloAnimationTrigger) var helloAnimationTrigger
-    @Default(.messageNotificationsEnabled) var messageNotificationsEnabled
-    @ObservedObject private var messageManager = MessageNotificationManager.shared
-    @State private var diagnosticsMessage: String?
     @Default(.hideExternalNotchUntilMedia) var hideExternalNotchUntilMedia
     @Default(.nonNotchHeight) var nonNotchHeight
     @Default(.nonNotchHeightMode) var nonNotchHeightMode
@@ -1074,82 +1079,6 @@ struct GeneralSettings: View {
 
     private func highlightID(_ title: String) -> String {
         SettingsTab.general.highlightID(for: title)
-    }
-
-    @ViewBuilder
-    private func messageNotificationSections() -> some View {
-        Section {
-            Defaults.Toggle(key: .messageNotificationsEnabled) {
-                Text("Show Messages notifications in the notch")
-            }
-            .settingsHighlight(id: highlightID("Show Messages notifications in the notch"))
-
-            if messageNotificationsEnabled {
-                HStack {
-                    Text("Status")
-                    Spacer()
-                    Text(messageManager.status.description)
-                        .foregroundStyle(.secondary)
-                }
-
-                Defaults.Toggle(key: .respectFocusMode) {
-                    Text("Stay quiet during Focus / Do Not Disturb")
-                }
-                .settingsHighlight(id: highlightID("Stay quiet during Focus / Do Not Disturb"))
-                HStack {
-                    Text("Focus")
-                    Spacer()
-                    Text(messageManager.focusDescription.isEmpty ? "Checking…" : messageManager.focusDescription)
-                        .foregroundStyle(.secondary)
-                }
-
-                HStack(spacing: 12) {
-                    Button("Open Full Disk Access settings") {
-                        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
-                            NSWorkspace.shared.open(url)
-                        }
-                    }
-                    Button("Show a test message") {
-                        MessageBannerModel.shared.add([
-                            IncomingMessage(
-                                id: Int64.random(in: 1_000_000_000...2_000_000_000),
-                                chatGUID: "atoll-test-chat",
-                                chatName: nil,
-                                isGroup: false,
-                                senderID: "+15555550123",
-                                senderName: "Jamie Chen",
-                                senderPhoto: nil,
-                                text: "Launch plan is in the shared folder. Ship it! Let me know when you've had a look, I'm around all afternoon.",
-                                date: Date(),
-                                service: "iMessage",
-                                thumbnail: nil
-                            )
-                        ])
-                    }
-                }
-            }
-        } header: {
-            Text("Messages")
-        } footer: {
-            Text("Incoming texts drop out of the notch with the sender, photos and a reply field. Atoll reads the Messages database on this Mac, so it needs Full Disk Access (System Settings → Privacy & Security). Contacts and Automation permissions are asked for the first time they are used. Nothing leaves your Mac. While a Focus is on, messages are silenced completely: the exceptions you set in that Focus (allowed people and apps) are not applied yet. Muted chats are not detected yet.")
-        }
-
-        Section {
-            Button("Capture notification layout (15 second countdown)") {
-                NotificationDiagnostics.shared.start { _, message in
-                    diagnosticsMessage = message
-                }
-            }
-            if let diagnosticsMessage {
-                Text(diagnosticsMessage)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        } header: {
-            Text("WhatsApp & Call Support (diagnostics)")
-        } footer: {
-            Text("Click the button, then within 15 seconds receive a WhatsApp message or an iPhone/FaceTime call so its banner is on screen. Atoll records how the banner looks to macOS (nothing is sent anywhere), saves a text file in ~/Library/Logs/Atoll and copies it to the clipboard. It beeps when it starts and when it has finished. Needs the Accessibility permission.")
-        }
     }
 
     var body: some View {
@@ -1193,7 +1122,6 @@ struct GeneralSettings: View {
                 Text("Minimalistic mode focuses on media controls and system HUDs, hiding all extra features for a clean, focused experience. Automatically enables simpler animations.")
             }
 
-            messageNotificationSections()
 
             Section {
                 Defaults.Toggle(key: .menubarIcon) {

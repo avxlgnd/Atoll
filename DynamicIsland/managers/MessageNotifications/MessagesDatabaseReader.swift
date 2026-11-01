@@ -11,6 +11,11 @@ import Foundation
 import ImageIO
 import SQLite3
 
+enum MessageSource: Equatable {
+    case messages
+    case whatsApp
+}
+
 struct IncomingMessage: Identifiable {
     let id: Int64
     let chatGUID: String
@@ -23,6 +28,7 @@ struct IncomingMessage: Identifiable {
     let date: Date
     let service: String
     var thumbnail: NSImage?
+    var source: MessageSource = .messages
 }
 
 enum MessagesDatabaseError: Error {
@@ -174,7 +180,13 @@ final class MessagesDatabaseReader {
             path = Self.text(stmt, 0)
         })
         guard let path else { return nil }
+        return Self.thumbnail(atPath: path)
+    }
+
+    /// A small preview of an image file (HEIC and others included).
+    static func thumbnail(atPath path: String) -> NSImage? {
         let expanded = (path as NSString).expandingTildeInPath
+        guard FileManager.default.fileExists(atPath: expanded) else { return nil }
         let url = URL(fileURLWithPath: expanded) as CFURL
         guard let source = CGImageSourceCreateWithURL(url, nil) else { return nil }
         let options: [CFString: Any] = [
