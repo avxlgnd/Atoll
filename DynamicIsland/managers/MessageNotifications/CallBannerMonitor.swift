@@ -28,6 +28,15 @@ struct IncomingCall {
         let letters = name.split(separator: " ").prefix(2).compactMap { $0.first }.filter { $0.isLetter }
         return String(letters).uppercased()
     }
+
+    /// Presses the Accept / Decline button of macOS's own call banner.
+    func pressAccept() {
+        _ = AXUIElementPerformAction(accept, "AXPress" as CFString)
+    }
+
+    func pressDecline() {
+        _ = AXUIElementPerformAction(decline, "AXPress" as CFString)
+    }
 }
 
 final class CallBannerMonitor: ObservableObject {

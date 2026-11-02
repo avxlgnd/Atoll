@@ -6,7 +6,6 @@
 //
 
 import AppKit
-import ApplicationServices
 import Defaults
 import Foundation
 import SwiftUI
@@ -133,13 +132,13 @@ final class MessageBannerModel: ObservableObject {
 
     func answerCall() {
         guard let call = activeCall else { return }
-        AXUIElementPerformAction(call.accept, kAXPressAction as CFString)
+        call.pressAccept()
         finishCall()
     }
 
     func declineCall() {
         guard let call = activeCall else { return }
-        AXUIElementPerformAction(call.decline, kAXPressAction as CFString)
+        call.pressDecline()
         finishCall()
     }
 
@@ -152,11 +151,13 @@ final class MessageBannerModel: ObservableObject {
     private func presentBanner() {
         if Defaults[.messageBannerInNotch] {
             isVisible = true
-            DynamicIslandViewCoordinator.shared.toggleExpandingView(
-                status: true,
-                type: .messages,
-                autoHideDuration: 3600 // dismissal is handled here
-            )
+            Task { @MainActor in
+                DynamicIslandViewCoordinator.shared.toggleExpandingView(
+                    status: true,
+                    type: .messages,
+                    autoHideDuration: 3600 // dismissal is handled here
+                )
+            }
         } else {
             Task { @MainActor in
                 MessageBannerWindowManager.shared.show()
@@ -225,7 +226,9 @@ final class MessageBannerModel: ObservableObject {
             isVisible = false
         }
         if Defaults[.messageBannerInNotch] {
-            DynamicIslandViewCoordinator.shared.toggleExpandingView(status: false, type: .messages)
+            Task { @MainActor in
+                DynamicIslandViewCoordinator.shared.toggleExpandingView(status: false, type: .messages)
+            }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
             guard let self, !self.isVisible else { return }
