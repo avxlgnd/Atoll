@@ -497,6 +497,7 @@ struct SettingsView: View {
             // System
             .hudAndOSD,
             .battery,
+            .notifications,
             // Productivity
             .timer,
             .calendar,
