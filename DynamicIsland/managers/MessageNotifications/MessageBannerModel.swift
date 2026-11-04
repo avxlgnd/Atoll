@@ -31,7 +31,8 @@ struct BannerConversation: Identifiable {
 
     /// For group chats the text is prefixed with the sender's first name.
     func displayText(for message: IncomingMessage) -> String {
-        guard isGroup else { return message.text }
+        // WhatsApp groups show the sender on their own line (like the macOS banner).
+        guard isGroup, source == .messages else { return message.text }
         let first = message.senderName.split(separator: " ").first.map(String.init) ?? message.senderName
         return "\(first): \(message.text)"
     }

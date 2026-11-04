@@ -58,7 +58,7 @@ final class WhatsAppDatabaseReader {
         path = found
 
         do {
-            for table in ["ZWAMESSAGE", "ZWACHATSESSION", "ZWAGROUPMEMBER", "ZWAMEDIAITEM"] {
+            for table in ["ZWAMESSAGE", "ZWACHATSESSION", "ZWAGROUPMEMBER", "ZWAMEDIAITEM", "ZWAPROFILEPUSHNAME"] {
                 columns[table] = try tableColumns(table)
             }
         } catch {
@@ -88,6 +88,7 @@ final class WhatsAppDatabaseReader {
         let c = columns["ZWACHATSESSION"] ?? []
         let g = columns["ZWAGROUPMEMBER"] ?? []
         let mi = columns["ZWAMEDIAITEM"] ?? []
+        let pn = columns["ZWAPROFILEPUSHNAME"] ?? []
 
         func pick(_ set: Set<String>, _ prefix: String, _ name: String) -> String {
             set.contains(name) ? "\(prefix).\(name)" : "NULL"
@@ -96,17 +97,23 @@ final class WhatsAppDatabaseReader {
         let hasChat = !c.isEmpty && c.contains("Z_PK")
         let hasGroup = !g.isEmpty && g.contains("Z_PK") && m.contains("ZGROUPMEMBER")
         let hasMedia = !mi.isEmpty && mi.contains("Z_PK") && m.contains("ZMEDIAITEM")
+        let hasPushNames = hasChat && pn.contains("ZJID") && pn.contains("ZPUSHNAME")
 
         var sql = """
         SELECT m.Z_PK, m.ZTEXT, \(pick(m, "m", "ZMESSAGETYPE")), \(pick(m, "m", "ZPUSHNAME")), \(pick(m, "m", "ZMESSAGEDATE")),
                \(hasChat ? pick(c, "c", "ZCONTACTJID") : "NULL"), \(hasChat ? pick(c, "c", "ZPARTNERNAME") : "NULL"),
                \(hasGroup ? pick(g, "gm", "ZCONTACTNAME") : "NULL"), \(hasGroup ? pick(g, "gm", "ZMEMBERJID") : "NULL"),
-               \(hasMedia ? pick(mi, "mi", "ZMEDIALOCALPATH") : "NULL")
+               \(hasMedia ? pick(mi, "mi", "ZMEDIALOCALPATH") : "NULL"),
+               \(hasPushNames ? "pn.ZPUSHNAME" : "NULL")
         FROM ZWAMESSAGE m
         """
         if hasChat { sql += "\nLEFT JOIN ZWACHATSESSION c ON c.Z_PK = m.ZCHATSESSION" }
         if hasGroup { sql += "\nLEFT JOIN ZWAGROUPMEMBER gm ON gm.Z_PK = m.ZGROUPMEMBER" }
         if hasMedia { sql += "\nLEFT JOIN ZWAMEDIAITEM mi ON mi.Z_PK = m.ZMEDIAITEM" }
+        if hasPushNames {
+            let sender = hasGroup ? "COALESCE(gm.ZMEMBERJID, c.ZCONTACTJID)" : "c.ZCONTACTJID"
+            sql += "\nLEFT JOIN ZWAPROFILEPUSHNAME pn ON pn.ZJID = \(sender)"
+        }
         sql += "\nWHERE m.Z_PK > ?1 AND m.ZISFROMME = 0 ORDER BY m.Z_PK ASC LIMIT 25"
 
         var messages: [IncomingMessage] = []
@@ -125,19 +132,20 @@ final class WhatsAppDatabaseReader {
             let memberName = Self.text(stmt, 7)
             let memberJID = Self.text(stmt, 8)
             let mediaPath = Self.text(stmt, 9)
+            let profilePush = Self.text(stmt, 10)
 
             let isGroup = chatJID?.hasSuffix("@g.us") ?? false
             var thumbnail: NSImage?
 
             if text.isEmpty {
                 switch type {
-                case 1: text = "Photo"
-                case 2: text = "Video"
-                case 3: text = "Voice message"
-                case 4: text = "Contact"
-                case 5: text = "Location"
-                case 8: text = "Document"
-                case 15: text = "Sticker"
+                case 1: text = "📷 Photo"
+                case 2: text = "🎥 Video"
+                case 3: text = "🎤 Voice message"
+                case 4: text = "👤 Contact"
+                case 5: text = "📍 Location"
+                case 8: text = "📄 Document"
+                case 15: text = "Sent a sticker"
                 default: return // system messages and anything else without text
                 }
             }
@@ -146,12 +154,22 @@ final class WhatsAppDatabaseReader {
                     ?? MessagesDatabaseReader.thumbnail(atPath: mediaPath)
             }
 
+            // Some columns hold encoded identifiers instead of names; those are skipped.
+            func clean(_ value: String?) -> String? {
+                guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+                      !trimmed.isEmpty, !Self.looksLikeEncodedID(trimmed)
+                else { return nil }
+                return trimmed
+            }
+
             let phone = (isGroup ? memberJID : chatJID)?.split(separator: "@").first.map(String.init) ?? "WhatsApp"
-            let title = partnerName?.isEmpty == false ? partnerName! : (chatJID?.split(separator: "@").first.map(String.init) ?? "WhatsApp")
-            let sender: String = {
-                if isGroup { return memberName?.isEmpty == false ? memberName! : (pushName?.isEmpty == false ? pushName! : phone) }
-                return partnerName?.isEmpty == false ? partnerName! : (pushName?.isEmpty == false ? pushName! : phone)
-            }()
+            let chatPhone = chatJID?.split(separator: "@").first.map(String.init) ?? "WhatsApp"
+            // People who are not in your contacts are shown like WhatsApp itself does: ~Their Name
+            let pushed = (clean(profilePush) ?? clean(pushName)).map { "~" + $0 }
+            let title = clean(partnerName) ?? (isGroup ? "Group" : (pushed ?? chatPhone))
+            let sender: String = isGroup
+                ? (clean(memberName) ?? pushed ?? phone)
+                : (clean(partnerName) ?? pushed ?? phone)
 
             messages.append(IncomingMessage(
                 id: id,
@@ -184,7 +202,7 @@ final class WhatsAppDatabaseReader {
         do {
             try reader.open()
             out += "\nOpened: \(reader.path ?? "?")\n"
-            for table in ["ZWAMESSAGE", "ZWACHATSESSION", "ZWAGROUPMEMBER", "ZWAMEDIAITEM"] {
+            for table in ["ZWAMESSAGE", "ZWACHATSESSION", "ZWAGROUPMEMBER", "ZWAMEDIAITEM", "ZWAPROFILEPUSHNAME"] {
                 let names = (reader.columns[table] ?? []).sorted().joined(separator: ", ")
                 out += "\(table): \(names.isEmpty ? "(missing)" : names)\n"
             }
@@ -193,6 +211,15 @@ final class WhatsAppDatabaseReader {
             out += "\nCould not open: \(error)\n"
         }
         return out
+    }
+
+    /// True for values such as "CIyCqNcGIABIAZABAPABAtgCg7KD9JHslwM=": an encoded id, not a name.
+    static func looksLikeEncodedID(_ value: String) -> Bool {
+        guard value.count >= 20, !value.contains(" ") else { return false }
+        let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=_-")
+        guard value.unicodeScalars.allSatisfy({ allowed.contains($0) }) else { return false }
+        let hasDigit = value.contains { $0.isNumber }
+        return hasDigit || value.hasSuffix("=") || value.contains("+") || value.contains("/")
     }
 
     // MARK: - SQLite helpers

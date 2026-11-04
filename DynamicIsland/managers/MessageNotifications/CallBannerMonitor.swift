@@ -44,6 +44,8 @@ final class CallBannerMonitor: ObservableObject {
 
     @Published private(set) var statusText = "Off"
     @Published private(set) var lastDetection = ""
+    /// What the last scan saw (so a missing call can be diagnosed): windows and button labels.
+    @Published private(set) var lastScan = ""
 
     private let queue = DispatchQueue(label: "atoll.calls.scan", qos: .userInitiated)
     private var timer: DispatchSourceTimer?
@@ -138,16 +140,46 @@ final class CallBannerMonitor: ObservableObject {
         }
     }
 
+    private static let watchedBundleIDs = [
+        "com.apple.notificationcenterui",
+        "com.apple.UserNotificationCenter",
+        "com.apple.FaceTime"
+    ]
+
     private func scan() -> IncomingCall? {
-        guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.notificationcenterui").first else {
-            return nil
+        var found: IncomingCall?
+        var windowCount = 0
+        var labels: [String] = []
+
+        for bundleID in Self.watchedBundleIDs {
+            for app in NSRunningApplication.runningApplications(withBundleIdentifier: bundleID) {
+                let root = AXUIElementCreateApplication(app.processIdentifier)
+                // Banners show up as windows, or directly as children of the application.
+                var elements = axChildren(root, kAXWindowsAttribute) ?? []
+                elements += axChildren(root, kAXChildrenAttribute) ?? []
+                windowCount += elements.count
+
+                for element in elements {
+                    if found == nil { found = findCall(in: element, depth: 0) }
+
+                    var buttons: [(label: String, element: AXUIElement)] = []
+                    var texts: [String] = []
+                    collect(element, depth: 0, buttons: &buttons, texts: &texts)
+                    for button in buttons {
+                        let trimmed = button.label.trimmingCharacters(in: .whitespaces)
+                        if !trimmed.isEmpty, !labels.contains(trimmed), labels.count < 10 { labels.append(trimmed) }
+                    }
+                }
+            }
         }
-        let root = AXUIElementCreateApplication(app.processIdentifier)
-        guard let windows = axChildren(root, kAXWindowsAttribute), !windows.isEmpty else { return nil }
-        for window in windows {
-            if let call = findCall(in: window, depth: 0) { return call }
+
+        let summary = windowCount == 0
+            ? "No notification windows on screen"
+            : "\(windowCount) window(s) · controls: " + (labels.isEmpty ? "none found" : labels.joined(separator: ", "))
+        DispatchQueue.main.async { [weak self] in
+            if self?.lastScan != summary { self?.lastScan = summary }
         }
-        return nil
+        return found
     }
 
     /// Looks for the smallest element that contains both an "accept" and a "decline" button.
@@ -200,14 +232,23 @@ final class CallBannerMonitor: ObservableObject {
     ) {
         guard depth <= 10 else { return }
         let role = axString(element, kAXRoleAttribute) ?? ""
-        if role == kAXButtonRole as String {
-            let label = [
+        let controlRoles: Set<String> = ["AXButton", "AXMenuButton", "AXPopUpButton", "AXLink", "AXRadioButton"]
+        let isControl = controlRoles.contains(role) || (role == "AXGroup" && hasPressAction(element))
+        if isControl {
+            var parts = [
                 axString(element, kAXTitleAttribute),
                 axString(element, kAXDescriptionAttribute),
                 axString(element, kAXIdentifierAttribute),
-                axString(element, kAXHelpAttribute)
-            ].compactMap { $0 }.joined(separator: " ").lowercased()
-            buttons.append((label, element))
+                axString(element, kAXHelpAttribute),
+                axString(element, kAXValueAttribute)
+            ].compactMap { $0 }
+            // Many buttons carry their label as a text child instead of a title.
+            for child in (axChildren(element, kAXChildrenAttribute) ?? []).prefix(6) {
+                if let text = axString(child, kAXValueAttribute) ?? axString(child, kAXTitleAttribute) {
+                    parts.append(text)
+                }
+            }
+            buttons.append((parts.joined(separator: " ").lowercased(), element))
         } else if role == kAXStaticTextRole as String {
             if let value = axString(element, kAXValueAttribute) ?? axString(element, kAXTitleAttribute),
                !value.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -235,6 +276,12 @@ final class CallBannerMonitor: ObservableObject {
         if let string = value as? String { return string }
         if let number = value as? NSNumber { return number.stringValue }
         return nil
+    }
+
+    private func hasPressAction(_ element: AXUIElement) -> Bool {
+        var names: CFArray?
+        guard AXUIElementCopyActionNames(element, &names) == .success, let actions = names as? [String] else { return false }
+        return actions.contains("AXPress")
     }
 
     private func axChildren(_ element: AXUIElement, _ attribute: String) -> [AXUIElement]? {

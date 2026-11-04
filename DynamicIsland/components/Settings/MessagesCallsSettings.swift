@@ -52,6 +52,9 @@ struct MessagesCallsSettings: View {
                     }
                     if phoneCalls || faceTimeCalls {
                         statusRow("Calls", callMonitor.statusText)
+                        if !callMonitor.lastScan.isEmpty {
+                            statusRow("Last scan", callMonitor.lastScan)
+                        }
                         if !callMonitor.lastDetection.isEmpty {
                             statusRow("Last call banner", callMonitor.lastDetection)
                         }

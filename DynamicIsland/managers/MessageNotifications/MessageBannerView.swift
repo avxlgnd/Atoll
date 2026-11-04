@@ -74,6 +74,12 @@ struct MessageBannerContent: View {
             MessageAvatar(convo: convo, size: large ? 50 : 44)
 
             VStack(alignment: .leading, spacing: 3) {
+                if convo.source == .whatsApp, convo.isGroup, let latest = convo.latest {
+                    Text(latest.senderName)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                }
                 Text(convo.title)
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.white)
@@ -322,6 +328,18 @@ struct MessageAvatar: View {
     var size: CGFloat = 48
 
     var body: some View {
+        if convo.source == .whatsApp, let icon = WhatsAppAppIcon.image {
+            // Like the macOS banner: WhatsApp's own app icon.
+            Image(nsImage: icon)
+                .resizable()
+                .scaledToFit()
+                .frame(width: size, height: size)
+        } else {
+            standardAvatar
+        }
+    }
+
+    private var standardAvatar: some View {
         ZStack(alignment: .bottomTrailing) {
             avatar
                 .frame(width: size, height: size)
@@ -366,4 +384,14 @@ struct MessageAvatar: View {
             }
         }
     }
+}
+
+/// WhatsApp's app icon, looked up from the installed app.
+enum WhatsAppAppIcon {
+    static let image: NSImage? = {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "net.whatsapp.WhatsApp") else {
+            return nil
+        }
+        return NSWorkspace.shared.icon(forFile: url.path)
+    }()
 }
