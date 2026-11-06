@@ -83,7 +83,16 @@ final class WhatsAppDatabaseReader {
         return result
     }
 
-    func newMessages(after pk: Int64) throws -> [IncomingMessage] {
+    private struct QueryPlan {
+        let sql: String
+        /// Extra columns that may hold a person's name (they are not always where one expects them).
+        let extraNameExpressions: [String]
+    }
+
+    /// Fixed columns: 0 id, 1 text, 2 type, 3 push name, 4 date, 5 chat jid, 6 partner name,
+    /// 7 member contact name, 8 member jid, 9 media path, 10 profile push name,
+    /// 11 chat session id, 12 from jid, then the extra name columns.
+    private func queryPlan(whereClause: String, order: String, limit: Int) -> QueryPlan {
         let m = columns["ZWAMESSAGE"] ?? []
         let c = columns["ZWACHATSESSION"] ?? []
         let g = columns["ZWAGROUPMEMBER"] ?? []
@@ -99,14 +108,25 @@ final class WhatsAppDatabaseReader {
         let hasMedia = !mi.isEmpty && mi.contains("Z_PK") && m.contains("ZMEDIAITEM")
         let hasPushNames = hasChat && pn.contains("ZJID") && pn.contains("ZPUSHNAME")
 
-        var sql = """
+        var extras: [String] = []
+        if hasGroup {
+            for name in g.sorted() where name.contains("NAME") && name != "ZCONTACTNAME" { extras.append("gm.\(name)") }
+        }
+        if hasPushNames {
+            for name in pn.sorted() where name.contains("NAME") && name != "ZPUSHNAME" { extras.append("pn.\(name)") }
+        }
+
+        var select = """
         SELECT m.Z_PK, m.ZTEXT, \(pick(m, "m", "ZMESSAGETYPE")), \(pick(m, "m", "ZPUSHNAME")), \(pick(m, "m", "ZMESSAGEDATE")),
                \(hasChat ? pick(c, "c", "ZCONTACTJID") : "NULL"), \(hasChat ? pick(c, "c", "ZPARTNERNAME") : "NULL"),
                \(hasGroup ? pick(g, "gm", "ZCONTACTNAME") : "NULL"), \(hasGroup ? pick(g, "gm", "ZMEMBERJID") : "NULL"),
                \(hasMedia ? pick(mi, "mi", "ZMEDIALOCALPATH") : "NULL"),
-               \(hasPushNames ? "pn.ZPUSHNAME" : "NULL")
-        FROM ZWAMESSAGE m
+               \(hasPushNames ? "pn.ZPUSHNAME" : "NULL"),
+               \(pick(m, "m", "ZCHATSESSION")), \(pick(m, "m", "ZFROMJID"))
         """
+        for expression in extras { select += ", \(expression)" }
+
+        var sql = select + "\nFROM ZWAMESSAGE m"
         if hasChat { sql += "\nLEFT JOIN ZWACHATSESSION c ON c.Z_PK = m.ZCHATSESSION" }
         if hasGroup { sql += "\nLEFT JOIN ZWAGROUPMEMBER gm ON gm.Z_PK = m.ZGROUPMEMBER" }
         if hasMedia { sql += "\nLEFT JOIN ZWAMEDIAITEM mi ON mi.Z_PK = m.ZMEDIAITEM" }
@@ -114,12 +134,17 @@ final class WhatsAppDatabaseReader {
             let sender = hasGroup ? "COALESCE(gm.ZMEMBERJID, c.ZCONTACTJID)" : "c.ZCONTACTJID"
             sql += "\nLEFT JOIN ZWAPROFILEPUSHNAME pn ON pn.ZJID = \(sender)"
         }
-        sql += "\nWHERE m.Z_PK > ?1 AND m.ZISFROMME = 0 ORDER BY m.Z_PK ASC LIMIT 25"
+        sql += "\nWHERE \(whereClause) ORDER BY \(order) LIMIT \(limit)"
+        return QueryPlan(sql: sql, extraNameExpressions: extras)
+    }
+
+    func newMessages(after pk: Int64) throws -> [IncomingMessage] {
+        let plan = queryPlan(whereClause: "m.Z_PK > ?1 AND m.ZISFROMME = 0", order: "m.Z_PK ASC", limit: 25)
 
         var messages: [IncomingMessage] = []
         let baseDirectory = path.map { ($0 as NSString).deletingLastPathComponent } ?? ""
 
-        try query(sql, bind: { stmt in
+        try query(plan.sql, bind: { stmt in
             sqlite3_bind_int64(stmt, 1, pk)
         }, row: { stmt in
             let id = sqlite3_column_int64(stmt, 0)
@@ -133,6 +158,12 @@ final class WhatsAppDatabaseReader {
             let memberJID = Self.text(stmt, 8)
             let mediaPath = Self.text(stmt, 9)
             let profilePush = Self.text(stmt, 10)
+            let sessionPK: Int64? = sqlite3_column_type(stmt, 11) == SQLITE_NULL ? nil : sqlite3_column_int64(stmt, 11)
+            let fromJID = Self.text(stmt, 12)
+            let extraNames = (0..<plan.extraNameExpressions.count).map { Self.text(stmt, Int32(13 + $0)) }
+
+            // Status updates are not messages.
+            if chatJID == "status@broadcast" || fromJID == "status@broadcast" { return }
 
             let isGroup = chatJID?.hasSuffix("@g.us") ?? false
             var thumbnail: NSImage?
@@ -157,26 +188,31 @@ final class WhatsAppDatabaseReader {
             // Some columns hold encoded identifiers instead of names; those are skipped.
             func clean(_ value: String?) -> String? {
                 guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
-                      !trimmed.isEmpty, !Self.looksLikeEncodedID(trimmed)
+                      !trimmed.isEmpty, !Self.looksLikeEncodedID(trimmed),
+                      !trimmed.allSatisfy({ $0.isNumber || $0 == "+" || $0 == " " })
                 else { return nil }
                 return trimmed
             }
 
-            let phone = (isGroup ? memberJID : chatJID)?.split(separator: "@").first.map(String.init) ?? "WhatsApp"
-            let chatPhone = chatJID?.split(separator: "@").first.map(String.init) ?? "WhatsApp"
+            let senderJID = isGroup ? (memberJID ?? fromJID) : (chatJID ?? fromJID)
             // People who are not in your contacts are shown like WhatsApp itself does: ~Their Name
-            let pushed = (clean(profilePush) ?? clean(pushName)).map { "~" + $0 }
-            let title = clean(partnerName) ?? (isGroup ? "Group" : (pushed ?? chatPhone))
+            let pushed = (clean(profilePush) ?? clean(pushName) ?? extraNames.compactMap(clean).first).map { "~" + $0 }
+            let fallbackLabel = Self.label(forJID: senderJID, isGroupMember: isGroup)
+
+            let title = clean(partnerName) ?? (isGroup ? "Group" : (pushed ?? fallbackLabel))
             let sender: String = isGroup
-                ? (clean(memberName) ?? pushed ?? phone)
-                : (clean(partnerName) ?? pushed ?? phone)
+                ? (clean(memberName) ?? extraNames.compactMap(clean).first ?? pushed ?? fallbackLabel)
+                : (clean(partnerName) ?? pushed ?? fallbackLabel)
+
+            // Messages without a chat attached are grouped by who sent them, never lumped together.
+            let chatKey = chatJID ?? fromJID ?? sessionPK.map { "session-\($0)" } ?? "unknown"
 
             messages.append(IncomingMessage(
                 id: id,
-                chatGUID: "wa:" + (chatJID ?? "unknown"),
+                chatGUID: "wa:" + chatKey,
                 chatName: isGroup ? title : nil,
                 isGroup: isGroup,
-                senderID: phone,
+                senderID: senderJID?.split(separator: "@").first.map(String.init) ?? "WhatsApp",
                 senderName: sender,
                 senderPhoto: nil,
                 text: text,
@@ -187,6 +223,16 @@ final class WhatsAppDatabaseReader {
             ))
         })
         return messages
+    }
+
+    /// A readable stand-in when WhatsApp has no name for someone: their phone number,
+    /// or a plain label for the anonymous "@lid" ids newer WhatsApp versions use.
+    static func label(forJID jid: String?, isGroupMember: Bool) -> String {
+        guard let jid else { return isGroupMember ? "Group member" : "WhatsApp" }
+        if jid.hasSuffix("@lid") { return isGroupMember ? "Group member" : "WhatsApp contact" }
+        let number = jid.split(separator: "@").first.map(String.init) ?? ""
+        if number.count >= 7, number.allSatisfy({ $0.isNumber }) { return "+" + number }
+        return isGroupMember ? "Group member" : "WhatsApp"
     }
 
     // MARK: - Diagnostics
@@ -207,6 +253,7 @@ final class WhatsAppDatabaseReader {
                 out += "\(table): \(names.isEmpty ? "(missing)" : names)\n"
             }
             out += "Latest message id: \((try? reader.latestPK()) ?? -1)\n"
+            out += reader.maskedSamples()
         } catch {
             out += "\nCould not open: \(error)\n"
         }
@@ -220,6 +267,50 @@ final class WhatsAppDatabaseReader {
         guard value.unicodeScalars.allSatisfy({ allowed.contains($0) }) else { return false }
         let hasDigit = value.contains { $0.isNumber }
         return hasDigit || value.hasSuffix("=") || value.contains("+") || value.contains("/")
+    }
+
+    /// The last few incoming messages with every name and id masked (letters become a/A, digits 9),
+    /// so the shape of the data can be checked without revealing it.
+    func maskedSamples() -> String {
+        let plan = queryPlan(whereClause: "m.ZISFROMME = 0", order: "m.Z_PK DESC", limit: 3)
+        var out = "\nSample incoming messages (masked):\n"
+        let extraLabels = plan.extraNameExpressions
+        do {
+            var index = 0
+            try query(plan.sql, row: { stmt in
+                index += 1
+                let type = sqlite3_column_type(stmt, 2) == SQLITE_NULL ? "nil" : String(sqlite3_column_int(stmt, 2))
+                out += "#\(index) type=\(type)\n"
+                let fields: [(String, Int32)] = [
+                    ("m.ZPUSHNAME", 3), ("c.ZCONTACTJID", 5), ("c.ZPARTNERNAME", 6),
+                    ("gm.ZCONTACTNAME", 7), ("gm.ZMEMBERJID", 8), ("pn.ZPUSHNAME", 10), ("m.ZFROMJID", 12)
+                ]
+                for (label, column) in fields {
+                    out += "  \(label): \(Self.mask(Self.text(stmt, column)))\n"
+                }
+                for (offset, label) in extraLabels.enumerated() {
+                    out += "  \(label): \(Self.mask(Self.text(stmt, Int32(13 + offset))))\n"
+                }
+            })
+        } catch {
+            out += "  (could not read samples: \(error))\n"
+        }
+        return out
+    }
+
+    private static func mask(_ value: String?) -> String {
+        guard let value, !value.isEmpty else { return "nil" }
+        let parts = value.split(separator: "@", maxSplits: 1, omittingEmptySubsequences: false)
+        func shape(_ text: Substring) -> String {
+            String(text.map { character -> Character in
+                if character.isNumber { return "9" }
+                if character.isLetter { return character.isUppercase ? "A" : "a" }
+                return character
+            })
+        }
+        var result = shape(parts[0])
+        if parts.count > 1 { result += "@" + parts[1] }
+        return "\(result) (\(value.count) chars)"
     }
 
     // MARK: - SQLite helpers
