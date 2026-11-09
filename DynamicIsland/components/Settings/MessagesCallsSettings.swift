@@ -72,7 +72,7 @@ struct MessagesCallsSettings: View {
                 } header: {
                     Text("Status & permissions")
                 } footer: {
-                    Text("Messages and WhatsApp need Full Disk Access (they read the apps' local databases). Calls need Accessibility (Atoll watches macOS's call banner and presses its Answer and Decline buttons). Contacts and Automation permissions are asked for the first time they are used. After allowing a permission it can take a few seconds to start.")
+                    Text("Messages and WhatsApp need Full Disk Access (they read the apps' local databases). Calls need Accessibility (Atoll watches macOS's call banner and presses its Answer and Decline buttons). WhatsApp also uses Accessibility, but only to read a sender's name off macOS's banner when WhatsApp's database does not have one. Contacts and Automation permissions are asked for the first time they are used. After allowing a permission it can take a few seconds to start.")
                 }
 
                 Section {

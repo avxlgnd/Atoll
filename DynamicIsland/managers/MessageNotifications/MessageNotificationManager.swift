@@ -65,6 +65,8 @@ final class MessageNotificationManager: ObservableObject {
     private var retryWork: DispatchWorkItem?
     private var cancellables = Set<AnyCancellable>()
     private var isEnabled = false
+    private var healer: NotificationSelfHealing?
+    private var consecutiveFailures = 0
 
     /// Hooks the manager up to its setting. Call once at launch.
     func configure() {
@@ -81,6 +83,34 @@ final class MessageNotificationManager: ObservableObject {
                 if enabled { self.start() } else { self.stop() }
             }
             .store(in: &cancellables)
+
+        healer = NotificationSelfHealing(
+            onSystemEvent: { [weak self] in self?.restart() },
+            healthCheck: { [weak self] in self?.ensureRunning() }
+        )
+    }
+
+    /// Rebuilds the watcher (after wake or unlock).
+    private func restart() {
+        guard isEnabled else { return }
+        retryWork?.cancel()
+        queue.async { [weak self] in
+            self?.timer?.cancel()
+            self?.timer = nil
+            self?.reader = nil
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            guard let self, self.isEnabled else { return }
+            self.start()
+        }
+    }
+
+    /// Called every 10 seconds: if it should be running but is not, start it again.
+    private func ensureRunning() {
+        guard isEnabled else { return }
+        if status != .running && status != .starting {
+            start()
+        }
     }
 
     private func start() {
@@ -98,6 +128,7 @@ final class MessageNotificationManager: ObservableObject {
                 self.reader = reader
                 self.lastRowID = last
                 self.beginTimer()
+                NotificationBackgroundActivity.acquire("messages")
                 DispatchQueue.main.async { self.status = .running }
             } catch MessagesDatabaseError.accessDenied {
                 DispatchQueue.main.async {
@@ -120,6 +151,7 @@ final class MessageNotificationManager: ObservableObject {
             self?.timer = nil
             self?.reader = nil
         }
+        NotificationBackgroundActivity.release("messages")
         status = .disabled
     }
 
@@ -137,8 +169,8 @@ final class MessageNotificationManager: ObservableObject {
     // MARK: - Polling (runs on `queue`)
 
     private func beginTimer() {
-        let source = DispatchSource.makeTimerSource(queue: queue)
-        source.schedule(deadline: .now() + 1, repeating: 1.0)
+        let source = DispatchSource.makeTimerSource(flags: .strict, queue: queue)
+        source.schedule(deadline: .now() + 1, repeating: 1.0, leeway: .milliseconds(100))
         source.setEventHandler { [weak self] in
             self?.poll()
         }
@@ -170,6 +202,7 @@ final class MessageNotificationManager: ObservableObject {
             let states = try reader.readStates(for: tracked)
             let nowRead = Set(states.filter { $0.value }.map { $0.key })
 
+            consecutiveFailures = 0
             guard !messages.isEmpty || !nowRead.isEmpty else { return }
             let batch = messages
             DispatchQueue.main.async {
@@ -182,7 +215,15 @@ final class MessageNotificationManager: ObservableObject {
                 self?.restartAfterFailure()
             }
         } catch {
-            // Transient failures (for example the database being busy) are retried on the next tick.
+            // Occasional failures (the database being busy) are retried on the next tick. If it keeps
+            // failing, the connection has gone stale (for example after sleep): reconnect.
+            consecutiveFailures += 1
+            if consecutiveFailures >= 5 {
+                consecutiveFailures = 0
+                DispatchQueue.main.async { [weak self] in
+                    self?.restartAfterFailure()
+                }
+            }
         }
     }
 

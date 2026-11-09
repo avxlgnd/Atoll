@@ -260,13 +260,14 @@ final class WhatsAppDatabaseReader {
         return out
     }
 
-    /// True for values such as "CIyCqNcGIABIAZABAPABAtgCg7KD9JHslwM=": an encoded id, not a name.
+    /// True for values such as "EAA=" or "CIyCqNcGIABIAZABAPABAtgCg7KD9JHslwM=": encoded data, not a name.
     static func looksLikeEncodedID(_ value: String) -> Bool {
-        guard value.count >= 20, !value.contains(" ") else { return false }
+        guard value.count >= 3, !value.contains(" ") else { return false }
         let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=_-")
         guard value.unicodeScalars.allSatisfy({ allowed.contains($0) }) else { return false }
-        let hasDigit = value.contains { $0.isNumber }
-        return hasDigit || value.hasSuffix("=") || value.contains("+") || value.contains("/")
+        // Names never end in "=" or contain "+" or "/", encoded data often does.
+        if value.hasSuffix("=") || value.contains("+") || value.contains("/") { return true }
+        return value.count >= 20 && value.contains { $0.isNumber }
     }
 
     /// The last few incoming messages with every name and id masked (letters become a/A, digits 9),
@@ -365,6 +366,9 @@ final class WhatsAppNotificationManager: ObservableObject {
     private var retryWork: DispatchWorkItem?
     private var cancellables = Set<AnyCancellable>()
     private var isEnabled = false
+    private var isListening = false
+    private var healer: NotificationSelfHealing?
+    private var consecutiveFailures = 0
 
     func configure() {
         Publishers.CombineLatest(
@@ -380,6 +384,33 @@ final class WhatsAppNotificationManager: ObservableObject {
             if enabled { self.start() } else { self.stop() }
         }
         .store(in: &cancellables)
+
+        healer = NotificationSelfHealing(
+            onSystemEvent: { [weak self] in self?.restart() },
+            healthCheck: { [weak self] in self?.ensureRunning() }
+        )
+    }
+
+    /// Rebuilds the watcher (after wake or unlock), reopening WhatsApp's database.
+    private func restart() {
+        guard isEnabled else { return }
+        retryWork?.cancel()
+        isListening = false
+        queue.async { [weak self] in
+            self?.timer?.cancel()
+            self?.timer = nil
+            self?.reader = nil
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            guard let self, self.isEnabled else { return }
+            self.start()
+        }
+    }
+
+    /// Called every 10 seconds: if it should be running but is not, start it again.
+    private func ensureRunning() {
+        guard isEnabled, !isListening else { return }
+        start()
     }
 
     private func setStatus(_ text: String) {
@@ -402,6 +433,8 @@ final class WhatsAppNotificationManager: ObservableObject {
                 self.reader = reader
                 self.lastPK = last
                 self.beginTimer()
+                NotificationBackgroundActivity.acquire("whatsapp")
+                DispatchQueue.main.async { self.isListening = true }
                 self.setStatus("Listening for new messages")
             } catch WhatsAppDatabaseError.notFound {
                 self.setStatus("WhatsApp's database was not found. Allow Full Disk Access, and make sure the WhatsApp Mac app is installed and signed in.")
@@ -421,11 +454,13 @@ final class WhatsAppNotificationManager: ObservableObject {
 
     private func stop() {
         retryWork?.cancel()
+        isListening = false
         queue.async { [weak self] in
             self?.timer?.cancel()
             self?.timer = nil
             self?.reader = nil
         }
+        NotificationBackgroundActivity.release("whatsapp")
         setStatus("Off")
     }
 
@@ -440,8 +475,8 @@ final class WhatsAppNotificationManager: ObservableObject {
     }
 
     private func beginTimer() {
-        let source = DispatchSource.makeTimerSource(queue: queue)
-        source.schedule(deadline: .now() + 1, repeating: 1.0)
+        let source = DispatchSource.makeTimerSource(flags: .strict, queue: queue)
+        source.schedule(deadline: .now() + 1, repeating: 1.0, leeway: .milliseconds(100))
         source.setEventHandler { [weak self] in
             self?.poll()
         }
@@ -461,13 +496,34 @@ final class WhatsAppNotificationManager: ObservableObject {
             let focusActive: Bool? = Defaults[.respectFocusMode] ? FocusStatusReader.isFocusActive() : false
             if focusActive == true { messages.removeAll() }
 
+            // When the database has no usable name, read it off the banner macOS shows.
+            let placeholders: Set<String> = ["Group member", "WhatsApp contact", "WhatsApp"]
+            for index in messages.indices {
+                let sender = messages[index].senderName
+                guard placeholders.contains(sender) || sender.hasPrefix("+") else { continue }
+                if let names = NotificationBannerLookup.names(forBody: messages[index].text, isGroup: messages[index].isGroup) {
+                    if let name = names.sender { messages[index].senderName = name }
+                    if let title = names.title, messages[index].chatName == "Group" { messages[index].chatName = title }
+                }
+            }
+
+            consecutiveFailures = 0
             guard !messages.isEmpty else { return }
             let batch = messages
             DispatchQueue.main.async {
                 MessageBannerModel.shared.add(batch)
             }
         } catch {
-            // Transient failures (the database being busy) are retried on the next tick.
+            // Occasional failures are retried on the next tick. If it keeps failing, WhatsApp has
+            // probably replaced its database file (for example after it restarted): reconnect.
+            consecutiveFailures += 1
+            if consecutiveFailures >= 5 {
+                consecutiveFailures = 0
+                DispatchQueue.main.async { [weak self] in
+                    self?.setStatus("Reconnecting…")
+                    self?.restart()
+                }
+            }
         }
     }
 }

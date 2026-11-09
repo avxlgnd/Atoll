@@ -19,7 +19,7 @@ enum MessageSource: Equatable {
 struct IncomingMessage: Identifiable {
     let id: Int64
     let chatGUID: String
-    let chatName: String?
+    var chatName: String?
     let isGroup: Bool
     let senderID: String
     var senderName: String

@@ -52,6 +52,9 @@ final class CallBannerMonitor: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var missingScans = 0
     private var reportedKey: String?
+    private var shouldRun = false
+    private var isRunning = false
+    private var healer: NotificationSelfHealing?
 
     func configure() {
         Publishers.CombineLatest3(
@@ -63,9 +66,35 @@ final class CallBannerMonitor: ObservableObject {
         .removeDuplicates()
         .receive(on: DispatchQueue.main)
         .sink { [weak self] enabled in
+            self?.shouldRun = enabled
             if enabled { self?.start() } else { self?.stop() }
         }
         .store(in: &cancellables)
+
+        healer = NotificationSelfHealing(
+            onSystemEvent: { [weak self] in self?.restart() },
+            healthCheck: { [weak self] in self?.ensureRunning() }
+        )
+    }
+
+    /// Rebuilds the scanner (after wake or unlock).
+    private func restart() {
+        guard shouldRun else { return }
+        isRunning = false
+        queue.async { [weak self] in
+            self?.timer?.cancel()
+            self?.timer = nil
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            guard let self, self.shouldRun else { return }
+            self.start()
+        }
+    }
+
+    /// Called every 10 seconds: if it should be scanning but is not, start it again.
+    private func ensureRunning() {
+        guard shouldRun, !isRunning else { return }
+        start()
     }
 
     /// Asks macOS for the Accessibility permission (shows the system prompt).
@@ -81,11 +110,14 @@ final class CallBannerMonitor: ObservableObject {
     }
 
     private func start() {
-        guard timer == nil else { return }
+        guard !isRunning else { return }
+        isRunning = true
+        NotificationBackgroundActivity.acquire("calls")
         queue.async { [weak self] in
-            guard let self, self.timer == nil else { return }
-            let source = DispatchSource.makeTimerSource(queue: self.queue)
-            source.schedule(deadline: .now() + 0.5, repeating: 0.5)
+            guard let self else { return }
+            self.timer?.cancel()
+            let source = DispatchSource.makeTimerSource(flags: .strict, queue: self.queue)
+            source.schedule(deadline: .now() + 0.5, repeating: 0.5, leeway: .milliseconds(50))
             source.setEventHandler { [weak self] in
                 self?.tick()
             }
@@ -96,6 +128,8 @@ final class CallBannerMonitor: ObservableObject {
     }
 
     private func stop() {
+        isRunning = false
+        NotificationBackgroundActivity.release("calls")
         queue.async { [weak self] in
             self?.timer?.cancel()
             self?.timer = nil
