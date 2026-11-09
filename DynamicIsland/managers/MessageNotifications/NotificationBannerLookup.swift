@@ -80,7 +80,7 @@ enum NotificationBannerLookup {
         return Names(sender: first, title: nil)
     }
 
-    private static func matches(_ a: String, _ b: String) -> Bool {
+    static func matches(_ a: String, _ b: String) -> Bool {
         guard a.count >= 3, b.count >= 3 else { return false }
         if a == b { return true }
         // Banners shorten long messages, so compare the start of both.
@@ -89,7 +89,7 @@ enum NotificationBannerLookup {
     }
 
     /// Lowercased, without leading emoji or punctuation ("💜 Sent a sticker" -> "sent a sticker").
-    private static func normalize(_ text: String) -> String {
+    static func normalize(_ text: String) -> String {
         let lowered = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmed = lowered.drop { !($0.isLetter || $0.isNumber) }
         return String(trimmed).trimmingCharacters(in: .whitespacesAndNewlines)

@@ -501,7 +501,10 @@ final class WhatsAppNotificationManager: ObservableObject {
             for index in messages.indices {
                 let sender = messages[index].senderName
                 guard placeholders.contains(sender) || sender.hasPrefix("+") else { continue }
-                if let names = NotificationBannerLookup.names(forBody: messages[index].text, isGroup: messages[index].isGroup) {
+                // First macOS's stored notification (works with the banner switched off), then the banner itself.
+                let found = NotificationCenterDatabase.names(forBody: messages[index].text, isGroup: messages[index].isGroup)
+                    ?? NotificationBannerLookup.names(forBody: messages[index].text, isGroup: messages[index].isGroup)
+                if let names = found {
                     if let name = names.sender { messages[index].senderName = name }
                     if let title = names.title, messages[index].chatName == "Group" { messages[index].chatName = title }
                 }
