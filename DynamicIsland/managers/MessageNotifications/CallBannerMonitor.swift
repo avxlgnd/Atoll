@@ -52,7 +52,10 @@ final class CallBannerMonitor: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var missingScans = 0
     private var reportedKey: String?
-    private var shouldRun = false
+    /// Read from the saved settings every time, so it is correct even before any change notification.
+    private var shouldRun: Bool {
+        Defaults[.notchNotificationsMaster] && (Defaults[.phoneCallsInNotch] || Defaults[.faceTimeCallsInNotch])
+    }
     private var isRunning = false
     private var healer: NotificationSelfHealing?
 
@@ -66,7 +69,6 @@ final class CallBannerMonitor: ObservableObject {
         .removeDuplicates()
         .receive(on: DispatchQueue.main)
         .sink { [weak self] enabled in
-            self?.shouldRun = enabled
             if enabled { self?.start() } else { self?.stop() }
         }
         .store(in: &cancellables)
@@ -75,6 +77,9 @@ final class CallBannerMonitor: ObservableObject {
             onSystemEvent: { [weak self] in self?.restart() },
             healthCheck: { [weak self] in self?.ensureRunning() }
         )
+
+        // Do not depend on the change notification for the saved value: if it is on, start now.
+        if shouldRun { start() }
     }
 
     /// Rebuilds the scanner (after wake or unlock).

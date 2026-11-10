@@ -365,7 +365,11 @@ final class WhatsAppNotificationManager: ObservableObject {
     private var lastPK: Int64 = 0
     private var retryWork: DispatchWorkItem?
     private var cancellables = Set<AnyCancellable>()
-    private var isEnabled = false
+    /// Read from the saved settings every time, so it is correct even before any change notification.
+    private var isEnabled: Bool {
+        Defaults[.notchNotificationsMaster] && Defaults[.whatsAppNotificationsEnabled]
+    }
+    private var isStarting = false
     private var isListening = false
     private var healer: NotificationSelfHealing?
     private var consecutiveFailures = 0
@@ -380,7 +384,6 @@ final class WhatsAppNotificationManager: ObservableObject {
         .receive(on: DispatchQueue.main)
         .sink { [weak self] enabled in
             guard let self else { return }
-            self.isEnabled = enabled
             if enabled { self.start() } else { self.stop() }
         }
         .store(in: &cancellables)
@@ -389,6 +392,9 @@ final class WhatsAppNotificationManager: ObservableObject {
             onSystemEvent: { [weak self] in self?.restart() },
             healthCheck: { [weak self] in self?.ensureRunning() }
         )
+
+        // Do not depend on the change notification for the saved value: if it is on, start now.
+        if isEnabled { start() }
     }
 
     /// Rebuilds the watcher (after wake or unlock), reopening WhatsApp's database.
@@ -420,7 +426,8 @@ final class WhatsAppNotificationManager: ObservableObject {
     }
 
     private func start() {
-        guard timer == nil else { return }
+        guard timer == nil, !isStarting else { return }
+        isStarting = true
         retryWork?.cancel()
         setStatus("Starting…")
 
@@ -434,26 +441,40 @@ final class WhatsAppNotificationManager: ObservableObject {
                 self.lastPK = last
                 self.beginTimer()
                 NotificationBackgroundActivity.acquire("whatsapp")
-                DispatchQueue.main.async { self.isListening = true }
+                DispatchQueue.main.async {
+                    self.isStarting = false
+                    self.isListening = true
+                }
                 self.setStatus("Listening for new messages")
             } catch WhatsAppDatabaseError.notFound {
+                self.finishFailedStart()
                 self.setStatus("WhatsApp's database was not found. Allow Full Disk Access, and make sure the WhatsApp Mac app is installed and signed in.")
                 self.scheduleRetry()
             } catch WhatsAppDatabaseError.accessDenied {
+                self.finishFailedStart()
                 self.setStatus("Waiting for Full Disk Access")
                 self.scheduleRetry()
             } catch WhatsAppDatabaseError.unrecognized(let reason) {
+                self.finishFailedStart()
                 self.setStatus("WhatsApp's database format is not recognised (\(reason))")
                 self.scheduleRetry(after: 30)
             } catch {
+                self.finishFailedStart()
                 self.setStatus("Problem: \(error)")
                 self.scheduleRetry()
             }
         }
     }
 
+    private func finishFailedStart() {
+        DispatchQueue.main.async { [weak self] in
+            self?.isStarting = false
+        }
+    }
+
     private func stop() {
         retryWork?.cancel()
+        isStarting = false
         isListening = false
         queue.async { [weak self] in
             self?.timer?.cancel()
@@ -475,6 +496,7 @@ final class WhatsAppNotificationManager: ObservableObject {
     }
 
     private func beginTimer() {
+        timer?.cancel()
         let source = DispatchSource.makeTimerSource(flags: .strict, queue: queue)
         source.schedule(deadline: .now() + 1, repeating: 1.0, leeway: .milliseconds(100))
         source.setEventHandler { [weak self] in

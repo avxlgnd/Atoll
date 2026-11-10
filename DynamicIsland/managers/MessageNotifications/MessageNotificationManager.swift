@@ -64,7 +64,11 @@ final class MessageNotificationManager: ObservableObject {
     private var lastRowID: Int64 = 0
     private var retryWork: DispatchWorkItem?
     private var cancellables = Set<AnyCancellable>()
-    private var isEnabled = false
+    /// Read from the saved settings every time, so it is correct even before any change notification.
+    private var isEnabled: Bool {
+        Defaults[.notchNotificationsMaster] && Defaults[.messageNotificationsEnabled]
+    }
+    private var isStarting = false
     private var healer: NotificationSelfHealing?
     private var consecutiveFailures = 0
 
@@ -79,7 +83,6 @@ final class MessageNotificationManager: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] enabled in
                 guard let self else { return }
-                self.isEnabled = enabled
                 if enabled { self.start() } else { self.stop() }
             }
             .store(in: &cancellables)
@@ -88,6 +91,9 @@ final class MessageNotificationManager: ObservableObject {
             onSystemEvent: { [weak self] in self?.restart() },
             healthCheck: { [weak self] in self?.ensureRunning() }
         )
+
+        // Do not depend on the change notification for the saved value: if it is on, start now.
+        if isEnabled { start() }
     }
 
     /// Rebuilds the watcher (after wake or unlock).
@@ -114,7 +120,8 @@ final class MessageNotificationManager: ObservableObject {
     }
 
     private func start() {
-        guard timer == nil else { return }
+        guard timer == nil, !isStarting else { return }
+        isStarting = true
         retryWork?.cancel()
         status = .starting
         MessageContactResolver.shared.requestAccessIfNeeded()
@@ -129,14 +136,19 @@ final class MessageNotificationManager: ObservableObject {
                 self.lastRowID = last
                 self.beginTimer()
                 NotificationBackgroundActivity.acquire("messages")
-                DispatchQueue.main.async { self.status = .running }
+                DispatchQueue.main.async {
+                    self.isStarting = false
+                    self.status = .running
+                }
             } catch MessagesDatabaseError.accessDenied {
                 DispatchQueue.main.async {
+                    self.isStarting = false
                     self.status = .needsFullDiskAccess
                     self.scheduleRetry()
                 }
             } catch {
                 DispatchQueue.main.async {
+                    self.isStarting = false
                     self.status = .failed("\(error)")
                     self.scheduleRetry()
                 }
@@ -146,6 +158,7 @@ final class MessageNotificationManager: ObservableObject {
 
     private func stop() {
         retryWork?.cancel()
+        isStarting = false
         queue.async { [weak self] in
             self?.timer?.cancel()
             self?.timer = nil
@@ -169,6 +182,7 @@ final class MessageNotificationManager: ObservableObject {
     // MARK: - Polling (runs on `queue`)
 
     private func beginTimer() {
+        timer?.cancel()
         let source = DispatchSource.makeTimerSource(flags: .strict, queue: queue)
         source.schedule(deadline: .now() + 1, repeating: 1.0, leeway: .milliseconds(100))
         source.setEventHandler { [weak self] in
